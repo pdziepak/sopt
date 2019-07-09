@@ -1,0 +1,3 @@
+# sopt
+
+Stochastic superoptimiser
