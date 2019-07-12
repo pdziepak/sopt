@@ -14,9 +14,32 @@
 # limitations under the License.
 
 # Remove redundant moves
-<
+< r0
 mov r2, r0
 add r2, r2, r2
 mov r0, r2
->
+> r0
 add r0, r0, r0
+
+# Remove redundant moves, two outputs
+< r0
+mov r2, r0
+mov r3, r0
+mov r1, r2
+mov r0, r3
+> r0 r1
+mov r1, r0
+
+# Remove redundant move of immediate, two outputs
+< r0
+mov r2, 4
+add r1, r0, r2
+> r0 r1
+add r1, r0, 4
+
+# Remove redundant moves, two inputs
+< r0 r1
+add r2, r0, r1
+mov r0, r2
+> r0
+add r0, r0, r1

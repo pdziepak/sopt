@@ -19,8 +19,13 @@
 #include "instruction.hpp"
 #include "uarch/uarch.hpp"
 
-basic_block optimize(uarch::uarch const& ua, basic_block, double score);
+struct interface {
+  std::vector<unsigned> input_registers;
+  std::vector<unsigned> output_registers;
+};
+
+basic_block optimize(uarch::uarch const& ua, interface const&, basic_block, double score);
 
 double score_performance(basic_block const& bb);
 
-bool equivalent(basic_block const& a, basic_block const& b);
+bool equivalent(interface const&, basic_block const& a, basic_block const& b);

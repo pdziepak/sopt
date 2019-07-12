@@ -17,7 +17,11 @@
 #include <charconv>
 #include <fstream>
 
+#include <fmt/ranges.h>
+
 #include <spdlog/spdlog.h>
+
+#include <range/v3/view.hpp>
 
 #include "instruction.hpp"
 #include "optimizer.hpp"
@@ -66,6 +70,18 @@ instruction parse_instruction(uarch::uarch const& ua, std::string_view line) {
   return instruction{opcode, std::move(operands)};
 }
 
+std::vector<unsigned> parse_interface(std::string_view str) {
+  auto strs = split(str, ' ');
+  return strs | ranges::view::transform([](std::string_view arg) {
+           if (arg.front() != 'r') { throw std::runtime_error("expected a register"); }
+           unsigned value = 0;
+           auto [p, ec] = std::from_chars(arg.begin() + 1, arg.end(), value);
+           if (ec != std::errc{}) { throw ec; }
+           return value;
+         }) |
+         ranges::to<std::vector>();
+}
+
 int main(int argc, char** argv) {
   spdlog::set_level(spdlog::level::trace);
 
@@ -92,6 +108,7 @@ int main(int argc, char** argv) {
   uint64_t total = 0;
   uint64_t failed = 0;
 
+  auto ifce = interface{{0}, {0}};
   auto input = std::optional<basic_block>{};
   auto actual_output = basic_block{};
   auto expected_output = basic_block{};
@@ -104,8 +121,14 @@ int main(int argc, char** argv) {
     spdlog::info("running test case #{}...", total);
 
     auto expected_score = score_performance(expected_output);
-    actual_output = optimize(*uarch, *input, expected_score);
-    if (!equivalent(actual_output, expected_output)) {
+    try {
+      actual_output = optimize(*uarch, ifce, *input, expected_score);
+    } catch (z3::exception const& ex) {
+      spdlog::error("z3 error: {}", ex);
+      ++failed;
+      return;
+    }
+    if (!equivalent(ifce, actual_output, expected_output)) {
       spdlog::error("actual output not equivalent to expected output\nactual:\n{}\nexpected:\n{}", actual_output,
                     expected_output);
       ++failed;
@@ -129,9 +152,11 @@ int main(int argc, char** argv) {
       run_previous();
       input.emplace();
       target = &*input;
+      ifce.input_registers = parse_interface(line.substr(1));
     } else if (line.front() == '>') {
       expected_output = {};
       target = &expected_output;
+      ifce.output_registers = parse_interface(line.substr(1));
     } else {
       target->instructions_.emplace_back(parse_instruction(*uarch, line));
     }

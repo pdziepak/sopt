@@ -24,6 +24,18 @@
 
 #include <z3++.h>
 
+template<typename Range> z3::expr make_and(z3::context& ctx, Range&& r) {
+  auto expr = z3::expr_vector(ctx);
+  for (auto&& e : r) { expr.push_back(e); }
+  return z3::mk_and(expr);
+}
+
+template<typename Range> z3::expr make_or(z3::context& ctx, Range&& r) {
+  auto expr = z3::expr_vector(ctx);
+  for (auto&& e : r) { expr.push_back(e); }
+  return z3::mk_or(expr);
+}
+
 class smt_context {
   z3::context& z3_;
   std::vector<std::tuple<z3::expr, std::function<void(uint64_t)>>> unknown_immediates_;
