@@ -18,14 +18,18 @@
 
 #include <cassert>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 class evaluation_context {
+  std::unordered_map<uint64_t, uint64_t> parameters_;
+
   std::vector<uint64_t> registers_;
   std::vector<bool> defined_registers_;
 
 public:
-  evaluation_context() : registers_(9), defined_registers_(9) {}
+  explicit evaluation_context(std::unordered_map<uint64_t, uint64_t> const& params)
+      : parameters_(params), registers_(9), defined_registers_(9) {}
 
   uint64_t get_register(unsigned r) const {
     assert(r < registers_.size());
@@ -38,4 +42,6 @@ public:
     defined_registers_[r] = true;
   }
   bool is_register_defined(unsigned r) const { return defined_registers_[r]; }
+
+  uint64_t get_parameter(uint64_t p) const { return parameters_.at(p); }
 };

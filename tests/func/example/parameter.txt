@@ -13,6 +13,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-sopt_add_func_test(example constant)
-sopt_add_func_test(example parameter)
-sopt_add_func_test(example redundant)
+# Remove redundant loads
+< p[0]
+mov r1, p[0]
+mov r2, p[0]
+add r0, r1, r2
+> r0
+mov r0, p[0]
+add r0, r0, r0
+
+# Merge additions
+< p[0]
+mov r0, 0
+add r0, r0, p[0]
+add r0, r0, p[0]
+add r0, r0, p[0]
+add r0, r0, p[0]
+add r0, r0, p[0]
+> r0
+mov r0, 5
+mul r0, r0, p[0]
+
+# Multiple parameters
+< p[0] p[1]
+mov r0, 0
+mov r1, 0
+mov r2, 0
+add r0, r0, p[0]
+add r1, r1, p[1]
+add r2, r2, p[0]
+add r2, r2, p[1]
+> r0 r1 r2
+mov r0, p[0]
+mov r1, p[1]
+add r2, r0, r1

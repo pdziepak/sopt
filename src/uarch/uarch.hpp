@@ -46,6 +46,8 @@ inline struct imm_t {
 } imm;
 inline struct reg_t {
 } reg;
+inline struct param_t {
+} param;
 inline struct dst_reg_t : reg_t {
 } dst_reg;
 
@@ -58,6 +60,7 @@ template<typename A, typename B> auto operator|(A, B) {
 namespace detail {
 
 template<typename Operand> constexpr bool allows_immediates = std::is_base_of_v<operand_descriptors::imm_t, Operand>;
+template<typename Operand> constexpr bool allows_parameters = std::is_base_of_v<operand_descriptors::param_t, Operand>;
 
 template<typename Context> class dst_wrapper {
   Context* ctx_;
@@ -78,6 +81,9 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
     }
     if constexpr (!allows_immediates<desc>) {
       if (op.is_immediate()) { return false; }
+    }
+    if constexpr (!allows_parameters<desc>) {
+      if (op.is_parameter()) { return false; }
     }
     return true;
   };
@@ -111,6 +117,7 @@ template<typename... Operands> struct operands {
   }
 
   static std::vector<bool> make_immediate_mask() { return std::vector<bool>{detail::allows_immediates<Operands>...}; }
+  static std::vector<bool> make_parameter_mask() { return std::vector<bool>{detail::allows_parameters<Operands>...}; }
 };
 
 class uarch_builder {
@@ -134,7 +141,7 @@ public:
     class concrete_opcode final : public opcode, Function {
     public:
       explicit concrete_opcode(std::string_view name, Function fn)
-          : opcode(name, ops::count, ops::make_immediate_mask()), Function(std::move(fn)) {}
+          : opcode(name, ops::count, ops::make_immediate_mask(), ops::make_parameter_mask()), Function(std::move(fn)) {}
 
       virtual bool evaluate(evaluation_context& ctx, std::vector<operand>& operands) override {
         if (!ops::verify(ctx, operands)) { return false; }

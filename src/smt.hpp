@@ -17,6 +17,7 @@
 #pragma once
 
 #include <functional>
+#include <unordered_map>
 #include <vector>
 
 #include <fmt/format.h>
@@ -38,11 +39,16 @@ template<typename Range> z3::expr make_or(z3::context& ctx, Range&& r) {
 
 class smt_context {
   z3::context& z3_;
+
+  std::unordered_map<uint64_t, z3::expr> parameters_;
+
   std::vector<std::tuple<z3::expr, std::function<void(uint64_t)>>> unknown_immediates_;
   std::vector<z3::expr> registers_;
 
 public:
-  explicit smt_context(z3::context& z3ctx) : z3_(z3ctx), registers_(9, z3_.int_val(0)) {}
+  explicit smt_context(z3::context& z3ctx, std::unordered_map<uint64_t, z3::expr> const& params = {})
+      : z3_(z3ctx), parameters_(params), registers_(9, z3_.int_val(0)) {}
+
   z3::expr get_register(unsigned r) const {
     assert(r < registers_.size());
     return registers_[r];
@@ -51,6 +57,9 @@ public:
     assert(r < registers_.size());
     registers_[r] = v;
   }
+
+  z3::expr get_parameter(uint64_t p) const { return parameters_.at(p); }
+
   z3::expr get_constant(uint64_t v) const { return z3_.bv_val(v, 32); }
 
   z3::expr add_unknown_immediate(std::function<void(uint64_t)> fn) {

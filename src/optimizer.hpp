@@ -20,6 +20,7 @@
 #include "uarch/uarch.hpp"
 
 struct interface {
+  std::vector<uint64_t> parameters;
   std::vector<unsigned> input_registers;
   std::vector<unsigned> output_registers;
 };

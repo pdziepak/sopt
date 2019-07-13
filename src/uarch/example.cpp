@@ -20,10 +20,10 @@ namespace uarch {
 
 std::unique_ptr<uarch> make_example() {
   using namespace operand_descriptors;
-  return uarch_builder{}                                                                                    //
-  ("add", operands{dst_reg, reg, reg | imm}, [](auto dst, auto src1, auto src2) { dst = src1 + src2; })     //
-      ("mul", operands{dst_reg, reg, reg | imm}, [](auto dst, auto src1, auto src2) { dst = src1 * src2; }) //
-      ("mov", operands{dst_reg, reg | imm}, [](auto dst, auto src) { dst = src; })                          //
+  return uarch_builder{}                                                                                            //
+  ("add", operands{dst_reg, reg, reg | imm | param}, [](auto dst, auto src1, auto src2) { dst = src1 + src2; })     //
+      ("mul", operands{dst_reg, reg, reg | imm | param}, [](auto dst, auto src1, auto src2) { dst = src1 * src2; }) //
+      ("mov", operands{dst_reg, reg | imm | param}, [](auto dst, auto src) { dst = src; })                          //
           .build();
 }
 

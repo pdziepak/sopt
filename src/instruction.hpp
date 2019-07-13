@@ -20,33 +20,58 @@
 #include "smt.hpp"
 
 class operand {
-  uint64_t value_;
-  bool constant_;
+  enum class type {
+    reg,
+    imm,
+    param,
+  };
+
+private:
+  uint64_t value_ = 0;
+  type type_ = type::reg;
   bool known_ = true;
 
 public:
-  uint64_t get(evaluation_context const& ctx) const { return constant_ ? value_ : ctx.get_register(value_); }
+  uint64_t get(evaluation_context const& ctx) const {
+    assert(is_valid(ctx));
+    switch (type_) {
+    case type::reg: return ctx.get_register(value_);
+    case type::imm: return value_;
+    case type::param: return ctx.get_parameter(value_);
+    }
+    abort();
+  }
   void set(evaluation_context& ctx, uint64_t v) const {
-    assert(!constant_);
+    assert(type_ == type::reg);
     ctx.set_register(value_, v);
   }
 
   z3::expr get(smt_context& ctx) {
-    return constant_ ? (known_ ? ctx.get_constant(value_) : ctx.add_unknown_immediate([this](uint64_t v) {
-      value_ = v;
-      known_ = true;
-    }))
-                     : ctx.get_register(value_);
+    switch (type_) {
+    case type::reg: return ctx.get_register(value_);
+    case type::imm:
+      if (known_) {
+        return ctx.get_constant(value_);
+      } else {
+        return ctx.add_unknown_immediate([this](uint64_t v) {
+          value_ = v;
+          known_ = true;
+        });
+      }
+    case type::param: return ctx.get_parameter(value_);
+    }
+    abort();
   }
   void set(smt_context& ctx, z3::expr v) const {
-    assert(!constant_);
+    assert(type_ == type::reg);
     ctx.set_register(value_, v);
   }
 
-  bool is_register() const { return !constant_; }
-  bool is_immediate() const { return constant_; }
-  bool is_known() const { return is_register() || known_; }
-  bool is_valid(evaluation_context const& ctx) const { return constant_ ? true : ctx.is_register_defined(value_); }
+  bool is_register() const { return type_ == type::reg; }
+  bool is_immediate() const { return type_ == type::imm; }
+  bool is_parameter() const { return type_ == type::param; }
+  bool is_known() const { return !is_immediate() || known_; }
+  bool is_valid(evaluation_context const& ctx) const { return !is_register() ? true : ctx.is_register_defined(value_); }
 
   uint64_t get_register_id() const {
     assert(is_register());
@@ -61,13 +86,13 @@ public:
   static operand make_register(unsigned r) {
     auto op = operand{};
     op.value_ = r;
-    op.constant_ = false;
+    op.type_ = type::reg;
     return op;
   }
 
   static operand make_unknown_immediate() {
     auto op = operand{};
-    op.constant_ = true;
+    op.type_ = type::imm;
     op.known_ = false;
     return op;
   }
@@ -75,21 +100,31 @@ public:
   static operand make_immediate(uint64_t v) {
     auto op = operand{};
     op.value_ = v;
-    op.constant_ = true;
+    op.type_ = type::imm;
     op.known_ = true;
     return op;
   }
 
+  static operand make_parameter(uint64_t v) {
+    auto op = operand{};
+    op.value_ = v;
+    op.type_ = type::param;
+    return op;
+  }
+
   friend std::ostream& operator<<(std::ostream& os, operand const& op) {
-    if (op.constant_) {
+    switch (op.type_) {
+    case type::reg: fmt::print(os, "r{}", op.value_); break;
+    case type::imm:
       if (op.known_) {
-        return os << op.value_;
+        fmt::print(os, "{:#x}", op.value_);
       } else {
-        return os << "<imm>";
+        fmt::print(os, "<imm>");
       }
-    } else {
-      return os << 'r' << op.value_;
+      break;
+    case type::param: fmt::print(os, "p[{:#x}]", op.value_); break;
     }
+    return os;
   }
 };
 
@@ -97,10 +132,11 @@ class opcode {
   std::string name_;
   unsigned operand_count_ = 0;
   std::vector<bool> immediates_;
+  std::vector<bool> parameters_;
 
 public:
-  explicit opcode(std::string_view name, unsigned opcount, std::vector<bool> immediates)
-      : name_(name), operand_count_(opcount), immediates_(std::move(immediates)) {}
+  explicit opcode(std::string_view name, unsigned opcount, std::vector<bool> immediates, std::vector<bool> parameters)
+      : name_(name), operand_count_(opcount), immediates_(std::move(immediates)), parameters_(std::move(parameters)) {}
   virtual ~opcode() = default;
 
   std::string_view name() const { return name_; }
@@ -109,6 +145,10 @@ public:
   bool can_be_immediate(unsigned op) const {
     assert(op < operand_count());
     return immediates_[op];
+  }
+  bool can_be_parameter(unsigned op) const {
+    assert(op < operand_count());
+    return parameters_[op];
   }
 
   virtual bool evaluate(evaluation_context& ctx, std::vector<operand>& operands) = 0;

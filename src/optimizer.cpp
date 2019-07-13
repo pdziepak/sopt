@@ -29,9 +29,10 @@
 
 #include "optimizer.hpp"
 
-std::optional<std::vector<uint64_t>> evaluate(basic_block& bb, std::vector<std::pair<unsigned, uint64_t>> in,
+std::optional<std::vector<uint64_t>> evaluate(basic_block& bb, std::unordered_map<uint64_t, uint64_t> const& params,
+                                              std::vector<std::pair<unsigned, uint64_t>> in,
                                               std::vector<unsigned> const& out) {
-  auto ctx = evaluation_context();
+  auto ctx = evaluation_context(params);
   for (auto [reg, val] : in) { ctx.set_register(reg, val); }
   for (auto& inst : bb.instructions_) {
     if (!inst.opcode_->evaluate(ctx, inst.operands_)) { return {}; }
@@ -41,10 +42,11 @@ std::optional<std::vector<uint64_t>> evaluate(basic_block& bb, std::vector<std::
 }
 
 std::vector<z3::expr> emit_smt(z3::context& z3ctx, basic_block& bb,
+                               std::unordered_map<uint64_t, z3::expr> const& params,
                                std::vector<std::pair<unsigned, z3::expr>> const& in, std::vector<unsigned> const& out) {
   // FIXME: const correctness
 
-  auto ctx = smt_context(z3ctx);
+  auto ctx = smt_context(z3ctx, params);
   for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
   for (auto& inst : bb.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
   return out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
@@ -57,7 +59,7 @@ opcode* random_opcode(uarch::uarch const& ua, std::default_random_engine& prng) 
   return opcodes[std::uniform_int_distribution<size_t>{0, opcodes.size() - 1}(prng)].get();
 }
 
-void mutate(uarch::uarch const& ua, std::default_random_engine& prng, basic_block& bb) {
+void mutate(uarch::uarch const& ua, std::default_random_engine& prng, interface const& ifce, basic_block& bb) {
   do {
     switch (std::uniform_int_distribution<unsigned>{0, 4}(prng)) {
     case 0: {
@@ -74,8 +76,13 @@ void mutate(uarch::uarch const& ua, std::default_random_engine& prng, basic_bloc
       auto oper_idx = std::uniform_int_distribution<size_t>{0, inst.operands_.size() - 1}(prng);
       auto& oper = inst.operands_[oper_idx];
       bool allow_immediate = inst.opcode_->can_be_immediate(oper_idx);
+      bool allow_parameter = inst.opcode_->can_be_parameter(oper_idx) && ifce.parameters.size();
       if (!allow_immediate || std::uniform_int_distribution<unsigned>{0, 100}(prng)) {
-        oper = operand::make_register(std::uniform_int_distribution<unsigned>{0, 3}(prng));
+        if (!allow_parameter || std::uniform_int_distribution<unsigned>{0, 1}(prng)) {
+          oper = operand::make_register(std::uniform_int_distribution<unsigned>{0, 3}(prng));
+        } else {
+          oper = operand::make_parameter(std::uniform_int_distribution<size_t>{0, ifce.parameters.size() - 1}(prng));
+        }
       } else {
         oper = operand::make_unknown_immediate();
       }
@@ -87,8 +94,15 @@ void mutate(uarch::uarch const& ua, std::default_random_engine& prng, basic_bloc
       inst.opcode_ = random_opcode(ua, prng);
       for (auto i = 0u; i < inst.opcode_->operand_count(); ++i) {
         bool allow_immediate = inst.opcode_->can_be_immediate(i);
+        bool allow_parameter = inst.opcode_->can_be_parameter(i) && ifce.parameters.size();
         if (!allow_immediate || std::uniform_int_distribution<unsigned>{0, 100}(prng)) {
-          inst.operands_.emplace_back(operand::make_register(std::uniform_int_distribution<unsigned>{0, 3}(prng)));
+          if (!allow_parameter || std::uniform_int_distribution<unsigned>{0, 1}(prng)) {
+            inst.operands_.emplace_back(operand::make_register(std::uniform_int_distribution<unsigned>{0, 3}(prng)));
+          } else {
+            inst.operands_.emplace_back(
+                operand::make_parameter(std::uniform_int_distribution<size_t>{0, ifce.parameters.size() - 1}(prng)));
+          }
+
         } else {
           inst.operands_.emplace_back(operand::make_unknown_immediate());
         }
@@ -124,17 +138,18 @@ bool has_unknown_immediates(basic_block const& bb) {
 
 void synthesize_immediates(
     z3::context& z3ctx, interface const& ifce,
-    std::vector<std::tuple<std::vector<std::pair<unsigned, uint64_t>>, std::vector<uint64_t>>> const& tests,
-    basic_block& candidate, std::vector<std::pair<unsigned, z3::expr>> const& in,
-    std::vector<z3::expr> const& target_smt, uint64_t& queries) {
+    std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
+                           std::vector<uint64_t>>> const& tests,
+    basic_block& candidate, std::unordered_map<uint64_t, z3::expr> const& params,
+    std::vector<std::pair<unsigned, z3::expr>> const& in, std::vector<z3::expr> const& target_smt, uint64_t& queries) {
   if (!has_unknown_immediates(candidate)) { return; }
 
   // FIXME: this is is_valid() actually
-  auto ret = evaluate(candidate, std::get<0>(tests.front()), ifce.output_registers);
+  auto ret = evaluate(candidate, std::get<0>(tests.front()), std::get<1>(tests.front()), ifce.output_registers);
   if (!ret) { return; }
 
   // FIXME: emit_smt
-  auto ctx = smt_context(z3ctx);
+  auto ctx = smt_context(z3ctx, params);
   for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
   for (auto& inst : candidate.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
   auto candidate_smt = ifce.output_registers |
@@ -142,34 +157,40 @@ void synthesize_immediates(
                        ranges::to<std::vector>();
 
   z3::solver z3slv(z3ctx);
-  for (auto [inv, outv] : tests) {
-    z3slv.add(z3::implies(make_and(z3ctx, ranges::view::zip(in | ranges::view::values, inv | ranges::view::values) |
-                                              ranges::view::transform([&](std::tuple<z3::expr, uint64_t> v) {
-                                                return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v), 32);
-                                              })),
-                          make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
-                                              ranges::view::transform([&](std::tuple<z3::expr, uint64_t> v) {
-                                                return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v), 32);
-                                              }))));
+  for (auto [paramv, inv, outv] : tests) {
+    z3slv.add(z3::implies(
+        make_and(z3ctx,
+                 ranges::view::concat(ranges::view::zip(params | ranges::view::values, paramv | ranges::view::values),
+                                      ranges::view::zip(in | ranges::view::values, inv | ranges::view::values)) |
+                     ranges::view::transform([&](std::tuple<z3::expr, uint64_t> v) {
+                       return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v), 32);
+                     })),
+        make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
+                            ranges::view::transform([&](std::tuple<z3::expr, uint64_t> v) {
+                              return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v), 32);
+                            }))));
   }
   ++queries;
   if (z3slv.check() != z3::check_result::sat) { return; }
 
   assert(candidate_smt.size() == target_smt.size());
 
-  auto in_expr = z3::expr_vector(z3ctx);
-  for (auto&& expr : in | ranges::view::values) { in_expr.push_back(expr); }
-  for (auto&& [a, b] : ranges::view::zip(candidate_smt, target_smt)) { z3slv.add(z3::forall(in_expr, a == b)); }
+  auto in_param_expr = z3::expr_vector(z3ctx);
+  for (auto&& expr : ranges::view::concat(params | ranges::view::values, in | ranges::view::values)) {
+    in_param_expr.push_back(expr);
+  }
+  for (auto&& [a, b] : ranges::view::zip(candidate_smt, target_smt)) { z3slv.add(z3::forall(in_param_expr, a == b)); }
   ++queries;
   if (z3slv.check() == z3::check_result::sat) { ctx.resolve_unknown_immediates(z3slv.get_model()); }
 }
 
 bool check_tests(
     interface const& ifce,
-    std::vector<std::tuple<std::vector<std::pair<unsigned, uint64_t>>, std::vector<uint64_t>>> const& tests,
+    std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
+                           std::vector<uint64_t>>> const& tests,
     basic_block& bb) {
-  for (auto [in, out] : tests) {
-    auto actual_out = evaluate(bb, in, ifce.output_registers);
+  for (auto [param, in, out] : tests) {
+    auto actual_out = evaluate(bb, param, in, ifce.output_registers);
     if (!actual_out || actual_out != out) { return false; }
   }
   return true;
@@ -194,12 +215,13 @@ double score_performance(basic_block const& bb) {
 }
 
 double score(interface const& ifce,
-             std::vector<std::tuple<std::vector<std::pair<unsigned, uint64_t>>, std::vector<uint64_t>>> const& tests,
+             std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
+                                    std::vector<uint64_t>>> const& tests,
              basic_block& bb) {
   double cost = 0;
 
-  for (auto [in, out] : tests) {
-    auto actual_out = evaluate(bb, in, ifce.output_registers);
+  for (auto [param, in, out] : tests) {
+    auto actual_out = evaluate(bb, param, in, ifce.output_registers);
     if (!actual_out) {
       cost += 4;
     } else if (actual_out != out) {
@@ -222,17 +244,23 @@ bool equivalent(interface const& ifce, basic_block const& a, basic_block const& 
   (void)ifce;
 
   z3::context ctx;
+  auto param = ifce.parameters | ranges::view::transform([&](uint64_t p) {
+                 return std::pair(p, ctx.bv_const(fmt::format("p{}", p).c_str(), 32));
+               }) |
+               ranges::to<std::unordered_map>();
   auto in = ifce.input_registers | ranges::view::transform([&](unsigned reg) {
               return std::pair(reg, ctx.bv_const(fmt::format("r{}", reg).c_str(), 32));
             }) |
             ranges::to<std::vector>();
-  auto expr_a = emit_smt(ctx, a1, in, ifce.output_registers);
-  auto expr_b = emit_smt(ctx, b1, in, ifce.output_registers);
+  auto expr_a = emit_smt(ctx, a1, param, in, ifce.output_registers);
+  auto expr_b = emit_smt(ctx, b1, param, in, ifce.output_registers);
   assert(expr_a.size() == expr_b.size());
 
   z3::solver slv(ctx);
   auto in_expr = z3::expr_vector(ctx);
-  for (auto&& expr : in | ranges::view::values) { in_expr.push_back(expr); }
+  for (auto&& expr : ranges::view::concat(param | ranges::view::values, in | ranges::view::values)) {
+    in_expr.push_back(expr);
+  }
   for (auto&& [a, b] : ranges::view::zip(expr_a, expr_b)) { slv.add(z3::forall(in_expr, a == b)); }
   return slv.check() == z3::check_result::sat;
 }
@@ -244,10 +272,12 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   static constexpr std::array<uint64_t, 5> initial_tests = {uint64_t(-2), uint64_t(-1), 0, 1, 2};
   spdlog::debug("preparing {} tests...", initial_tests.size());
   auto tests = initial_tests | ranges::view::transform([&](uint64_t v) {
+                 auto params = ifce.parameters | ranges::view::transform([&](uint64_t p) { return std::pair(p, v); }) |
+                               ranges::to<std::unordered_map>();
                  auto in = ifce.input_registers | ranges::view::transform([&](unsigned r) { return std::pair(r, v); }) |
                            ranges::to<std::vector>();
-                 auto out = evaluate(target, in, ifce.output_registers).value();
-                 return std::tuple(in, out);
+                 auto out = evaluate(target, params, in, ifce.output_registers).value();
+                 return std::tuple(params, in, out);
                }) |
                ranges::to<std::vector>();
   spdlog::trace("prepared tests: {}", fmt::join(tests, ", "));
@@ -257,7 +287,11 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
               return std::pair(reg, z3ctx.bv_const(fmt::format("r{}", reg).c_str(), 32));
             }) |
             ranges::to<std::vector>();
-  auto target_smt = emit_smt(z3ctx, target, in, ifce.output_registers);
+  auto param = ifce.parameters | ranges::view::transform([&](uint64_t p) {
+                 return std::pair(p, z3ctx.bv_const(fmt::format("p{}", p).c_str(), 32));
+               }) |
+               ranges::to<std::unordered_map>();
+  auto target_smt = emit_smt(z3ctx, target, param, in, ifce.output_registers);
   spdlog::debug("target smt formulae: {}", fmt::join(ranges::view::zip(ifce.output_registers, target_smt), ", "));
 
   auto target_score = score(ifce, tests, target);
@@ -286,9 +320,9 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
     ++candidates_total;
 
     auto candidate = target;
-    mutate(ua, prng, candidate);
+    mutate(ua, prng, ifce, candidate);
 
-    synthesize_immediates(z3ctx, ifce, tests, candidate, in, target_smt, solver_queries);
+    synthesize_immediates(z3ctx, ifce, tests, candidate, param, in, target_smt, solver_queries);
 
     auto candidate_score = score(ifce, tests, candidate);
     auto alpha = std::min(1., candidate_score / target_score);
@@ -302,7 +336,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
     if (!is_best_score) { continue; }
 
     if (check_tests(ifce, tests, target)) {
-      auto candidate_smt = emit_smt(z3ctx, candidate, in, ifce.output_registers);
+      auto candidate_smt = emit_smt(z3ctx, candidate, param, in, ifce.output_registers);
 
       ++solver_queries;
 
@@ -316,13 +350,17 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
         best_score = candidate_score;
         best = candidate;
       } else if (result == z3::check_result::sat) {
+        auto paramv = param | ranges::view::transform([&](std::pair<uint64_t, z3::expr> in) {
+                        return std::pair(std::get<0>(in), z3slv.get_model().eval(std::get<1>(in)).get_numeral_uint64());
+                      }) |
+                      ranges::to<std::unordered_map>();
         auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
                      return std::pair(std::get<0>(in), z3slv.get_model().eval(std::get<1>(in)).get_numeral_uint64());
                    }) |
                    ranges::to<std::vector>();
-        auto outv = evaluate(best, inv, ifce.output_registers).value();
-        spdlog::trace("adding test case: ({}, {})", inv, outv);
-        tests.emplace_back(inv, outv);
+        auto outv = evaluate(best, paramv, inv, ifce.output_registers).value();
+        spdlog::trace("adding test case: ({}, {}, {})", paramv, inv, outv);
+        tests.emplace_back(paramv, inv, outv);
 
         target_score = score(ifce, tests, target);
       }

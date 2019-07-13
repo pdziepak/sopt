@@ -58,19 +58,50 @@ instruction parse_instruction(uarch::uarch const& ua, std::string_view line) {
   auto operands = std::vector<operand>{};
   for (auto arg : args) {
     bool reg = false;
+    bool param = false;
     if (arg.front() == 'r') {
       reg = true;
       arg.remove_prefix(1);
+    } else if (arg.front() == 'p') {
+      arg.remove_prefix(2);
+      param = true;
     }
     uint64_t value = 0;
-    auto [p, ec] = std::from_chars(arg.begin(), arg.end(), value);
+    auto [p, ec] = std::from_chars(arg.begin(), arg.end() - param, value, param ? 16 : 10);
     if (ec != std::errc{}) { throw ec; }
-    operands.emplace_back(reg ? operand::make_register(value) : operand::make_immediate(value));
+    if (reg) {
+      operands.emplace_back(operand::make_register(value));
+    } else if (param) {
+      operands.emplace_back(operand::make_parameter(value));
+    } else {
+      operands.emplace_back(operand::make_immediate(value));
+    }
   }
   return instruction{opcode, std::move(operands)};
 }
 
-std::vector<unsigned> parse_interface(std::string_view str) {
+std::tuple<std::vector<uint64_t>, std::vector<unsigned>> parse_input_interface(std::string_view str) {
+  auto param = std::vector<uint64_t>{};
+  auto regs = std::vector<unsigned>{};
+  for (auto arg : split(str, ' ')) {
+    if (arg.front() == 'r') {
+      unsigned value = 0;
+      auto [p, ec] = std::from_chars(arg.begin() + 1, arg.end(), value);
+      if (ec != std::errc{}) { throw ec; }
+      regs.emplace_back(value);
+    } else if (arg.front() == 'p') {
+      auto pos = arg.find(']');
+      if (arg.data()[1] != '[' || pos == arg.npos) { throw std::runtime_error("parser error"); }
+      uint64_t value = 0;
+      auto [p, ec] = std::from_chars(arg.begin() + 2, arg.begin() + pos, value, 16);
+      if (ec != std::errc{}) { throw ec; }
+      param.emplace_back(value);
+    }
+  }
+  return {std::move(param), std::move(regs)};
+}
+
+std::vector<unsigned> parse_output_interface(std::string_view str) {
   auto strs = split(str, ' ');
   return strs | ranges::view::transform([](std::string_view arg) {
            if (arg.front() != 'r') { throw std::runtime_error("expected a register"); }
@@ -108,7 +139,7 @@ int main(int argc, char** argv) {
   uint64_t total = 0;
   uint64_t failed = 0;
 
-  auto ifce = interface{{0}, {0}};
+  auto ifce = interface{};
   auto input = std::optional<basic_block>{};
   auto actual_output = basic_block{};
   auto expected_output = basic_block{};
@@ -152,11 +183,11 @@ int main(int argc, char** argv) {
       run_previous();
       input.emplace();
       target = &*input;
-      ifce.input_registers = parse_interface(line.substr(1));
+      std::tie(ifce.parameters, ifce.input_registers) = parse_input_interface(line.substr(1));
     } else if (line.front() == '>') {
       expected_output = {};
       target = &expected_output;
-      ifce.output_registers = parse_interface(line.substr(1));
+      ifce.output_registers = parse_output_interface(line.substr(1));
     } else {
       target->instructions_.emplace_back(parse_instruction(*uarch, line));
     }
