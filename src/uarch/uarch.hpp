@@ -40,6 +40,7 @@ namespace operand_descriptors {
 
 namespace detail {
 template<typename A, typename B> struct or_t : A, B {};
+struct param_address_t {};
 } // namespace detail
 
 inline struct imm_t {
@@ -51,6 +52,10 @@ inline struct param_t {
 inline struct dst_reg_t : reg_t {
 } dst_reg;
 
+template<typename T> auto param_addr(T) {
+  return detail::or_t<T, detail::param_address_t>{};
+}
+
 template<typename A, typename B> auto operator|(A, B) {
   return detail::or_t<A, B>{};
 }
@@ -61,6 +66,8 @@ namespace detail {
 
 template<typename Operand> constexpr bool allows_immediates = std::is_base_of_v<operand_descriptors::imm_t, Operand>;
 template<typename Operand> constexpr bool allows_parameters = std::is_base_of_v<operand_descriptors::param_t, Operand>;
+template<typename Operand>
+constexpr bool is_parameter_address = std::is_base_of_v<operand_descriptors::detail::param_address_t, Operand>;
 
 template<typename Context> class dst_wrapper {
   Context* ctx_;
@@ -68,7 +75,24 @@ template<typename Context> class dst_wrapper {
 
 public:
   dst_wrapper(Context& ctx, operand& op) : ctx_(&ctx), op_(&op) {}
-  template<typename Value> void operator=(Value value) { op_->set(*ctx_, value); }
+  template<typename Value> void operator=(Value value) {
+    op_->set(*ctx_, static_cast<typename Context::value_type>(value));
+  }
+};
+
+template<typename Context> class src_wrapper {
+  Context* ctx_;
+  operand* op_;
+
+public:
+  src_wrapper(Context& ctx, operand& op) : ctx_(&ctx), op_(&op) {}
+  typename Context::value_type value() const { return op_->get(*ctx_); }
+  operator typename Context::value_type() const { return value(); }
+
+  friend auto operator+(src_wrapper const& a, src_wrapper const& b) { return a.value() + b.value(); }
+  friend auto operator*(src_wrapper const& a, src_wrapper const& b) { return a.value() * b.value(); }
+
+  friend auto params(src_wrapper const& addr) { return addr.ctx_->get_parameter(addr.value()); }
 };
 
 template<typename... Operands, size_t... Idx, typename Context>
@@ -85,6 +109,9 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
     if constexpr (!allows_parameters<desc>) {
       if (op.is_parameter()) { return false; }
     }
+    if constexpr (is_parameter_address<desc>) {
+      if (!ctx.is_valid_parameter(op.get(ctx))) { return false; }
+    }
     return true;
   };
   return (verify_operand(static_cast<Operands*>(nullptr), ops[Idx]) && ...);
@@ -92,7 +119,7 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
 
 template<size_t... Idx, typename Context, typename Function>
 void do_apply(std::index_sequence<Idx...>, Function&& fn, Context& ctx, std::vector<operand>& ops) {
-  fn(dst_wrapper<std::decay_t<Context>>(ctx, ops[0]), ops[Idx + 1].get(ctx)...);
+  fn(dst_wrapper<std::decay_t<Context>>(ctx, ops[0]), src_wrapper<std::decay_t<Context>>(ctx, ops[Idx + 1])...);
 };
 
 } // namespace detail

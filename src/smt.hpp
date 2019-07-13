@@ -23,6 +23,8 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include <range/v3/view.hpp>
+
 #include <z3++.h>
 
 template<typename Range> z3::expr make_and(z3::context& ctx, Range&& r) {
@@ -45,9 +47,13 @@ class smt_context {
   std::vector<std::tuple<z3::expr, std::function<void(uint64_t)>>> unknown_immediates_;
   std::vector<z3::expr> registers_;
 
+  z3::expr extra_restrictions_;
+
 public:
+  using value_type = z3::expr;
+
   explicit smt_context(z3::context& z3ctx, std::unordered_map<uint64_t, z3::expr> const& params = {})
-      : z3_(z3ctx), parameters_(params), registers_(9, z3_.int_val(0)) {}
+      : z3_(z3ctx), parameters_(params), registers_(9, z3_.int_val(0)), extra_restrictions_(z3_.bool_val(true)) {}
 
   z3::expr get_register(unsigned r) const {
     assert(r < registers_.size());
@@ -59,6 +65,14 @@ public:
   }
 
   z3::expr get_parameter(uint64_t p) const { return parameters_.at(p); }
+  z3::expr get_parameter(z3::expr p) {
+    auto current = get_constant(0); // TODO: poison?
+    for (auto [k, v] : parameters_) { current = z3::ite(p == get_constant(k), v, std::move(current)); }
+    extra_restrictions_ = std::move(extra_restrictions_) &&
+                          make_or(z3_, parameters_ | ranges::view::keys |
+                                           ranges::view::transform([&](uint64_t k) { return p == get_constant(k); }));
+    return current;
+  }
 
   z3::expr get_constant(uint64_t v) const { return z3_.bv_val(v, 32); }
 
@@ -73,4 +87,6 @@ public:
       if (e.is_numeral_u64(v)) { fn(e.get_numeral_uint64()); }
     }
   }
+
+  z3::expr extra_restrictions() const { return extra_restrictions_; }
 };

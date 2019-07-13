@@ -47,3 +47,13 @@ add r2, r2, p[1]
 mov r0, p[0]
 mov r1, p[1]
 add r2, r0, r1
+
+# Remove indirect parameter loads
+< p[2] p[3] p[4]
+mov r0, 2
+ld.param r1, r0
+add r0, r0, 1
+ld.param r0, r0
+> r0 r1
+mov r0, p[3]
+mov r1, p[2]
