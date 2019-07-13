@@ -89,4 +89,9 @@ public:
   }
 
   z3::expr extra_restrictions() const { return extra_restrictions_; }
+
+  static z3::expr make_u64(z3::expr const& lo, z3::expr const& hi) {
+    return z3::shl(z3::zext(hi, 32), 32) | z3::zext(lo, 32);
+  }
+  static std::tuple<z3::expr, z3::expr> split_u64(z3::expr v) { return {v.extract(31, 0), v.extract(63, 32)}; }
 };

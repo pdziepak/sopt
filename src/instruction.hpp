@@ -41,9 +41,22 @@ public:
     }
     abort();
   }
+  uint64_t get_hi(evaluation_context const& ctx) const {
+    assert(is_valid(ctx));
+    switch (type_) {
+    case type::reg: return ctx.get_register(value_ + 1);
+    case type::imm: abort();
+    case type::param: return ctx.get_parameter(value_ + 4);
+    }
+    abort();
+  }
   void set(evaluation_context& ctx, uint64_t v) const {
     assert(type_ == type::reg);
     ctx.set_register(value_, v);
+  }
+  void set_hi(evaluation_context& ctx, uint64_t v) const {
+    assert(type_ == type::reg);
+    ctx.set_register(value_ + 1, v);
   }
 
   z3::expr get(smt_context& ctx) {
@@ -62,9 +75,21 @@ public:
     }
     abort();
   }
+  z3::expr get_hi(smt_context& ctx) {
+    switch (type_) {
+    case type::reg: return ctx.get_register(value_ + 1);
+    case type::imm: abort();
+    case type::param: return ctx.get_parameter(value_ + 4);
+    }
+    abort();
+  }
   void set(smt_context& ctx, z3::expr v) const {
     assert(type_ == type::reg);
     ctx.set_register(value_, v);
+  }
+  void set_hi(smt_context& ctx, z3::expr v) const {
+    assert(type_ == type::reg);
+    ctx.set_register(value_ + 1, v);
   }
 
   bool is_register() const { return type_ == type::reg; }
@@ -72,6 +97,10 @@ public:
   bool is_parameter() const { return type_ == type::param; }
   bool is_known() const { return !is_immediate() || known_; }
   bool is_valid(evaluation_context const& ctx) const { return !is_register() ? true : ctx.is_register_defined(value_); }
+  bool is_valid64(evaluation_context const& ctx) const {
+    assert(is_register());
+    return ctx.is_register_defined(value_) && ctx.is_register_defined(value_ + 1);
+  }
 
   uint64_t get_register_id() const {
     assert(is_register());

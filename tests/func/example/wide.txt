@@ -13,7 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-sopt_add_func_test(example constant)
-sopt_add_func_test(example parameter)
-sopt_add_func_test(example redundant)
-sopt_add_func_test(example wide)
+# Redundant moves
+< r0 r1 r2 r3
+add.64 r2, r0, r2
+mov r0, r2
+mov r1, r3
+> r0 r1
+add.64 r0, r0, r2
+
+# Split wide load
+< p[0] p[4]
+mov r0, 0
+ld.param.64 r0, r0
+mov r2, r0
+mov r3, r1
+> r2 r3
+mov r2, 0x0
+ld.param.64 r2, r2

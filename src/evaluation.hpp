@@ -47,4 +47,8 @@ public:
 
   uint64_t get_parameter(uint64_t p) const { return parameters_.at(p); }
   bool is_valid_parameter(uint64_t p) const { return parameters_.count(p); }
+  bool is_valid_parameter64(uint64_t p) const { return is_valid_parameter(p) && is_valid_parameter(p + 4); }
+
+  static uint64_t make_u64(uint32_t lo, uint32_t hi) { return (uint64_t(hi) << 32) | lo; }
+  static std::tuple<uint32_t, uint32_t> split_u64(uint64_t v) { return {uint32_t(v), uint32_t(v >> 32)}; }
 };

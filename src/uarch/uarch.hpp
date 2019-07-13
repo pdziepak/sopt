@@ -41,19 +41,27 @@ namespace operand_descriptors {
 namespace detail {
 template<typename A, typename B> struct or_t : A, B {};
 struct param_address_t {};
+struct param2_address_t : param_address_t {};
 } // namespace detail
 
 inline struct imm_t {
 } imm;
 inline struct reg_t {
 } reg;
+inline struct reg2_t : reg_t {
+} reg2;
 inline struct param_t {
 } param;
 inline struct dst_reg_t : reg_t {
 } dst_reg;
+inline struct dst_reg2_t : reg2_t {
+} dst_reg2;
 
 template<typename T> auto param_addr(T) {
   return detail::or_t<T, detail::param_address_t>{};
+}
+template<typename T> auto param2_addr(T) {
+  return detail::or_t<T, detail::param2_address_t>{};
 }
 
 template<typename A, typename B> auto operator|(A, B) {
@@ -68,6 +76,8 @@ template<typename Operand> constexpr bool allows_immediates = std::is_base_of_v<
 template<typename Operand> constexpr bool allows_parameters = std::is_base_of_v<operand_descriptors::param_t, Operand>;
 template<typename Operand>
 constexpr bool is_parameter_address = std::is_base_of_v<operand_descriptors::detail::param_address_t, Operand>;
+template<typename Operand>
+constexpr bool is_double_parameter_address = std::is_base_of_v<operand_descriptors::detail::param2_address_t, Operand>;
 
 template<typename Context> class dst_wrapper {
   Context* ctx_;
@@ -77,6 +87,11 @@ public:
   dst_wrapper(Context& ctx, operand& op) : ctx_(&ctx), op_(&op) {}
   template<typename Value> void operator=(Value value) {
     op_->set(*ctx_, static_cast<typename Context::value_type>(value));
+  }
+  template<typename Value> void set64(Value value) {
+    auto [lo, hi] = ctx_->split_u64(static_cast<typename Context::value_type>(value));
+    op_->set(*ctx_, lo);
+    op_->set_hi(*ctx_, hi);
   }
 };
 
@@ -89,10 +104,15 @@ public:
   typename Context::value_type value() const { return op_->get(*ctx_); }
   operator typename Context::value_type() const { return value(); }
 
+  auto value64() { return ctx_->make_u64(op_->get(*ctx_), op_->get_hi(*ctx_)); }
+
   friend auto operator+(src_wrapper const& a, src_wrapper const& b) { return a.value() + b.value(); }
   friend auto operator*(src_wrapper const& a, src_wrapper const& b) { return a.value() * b.value(); }
 
   friend auto params(src_wrapper const& addr) { return addr.ctx_->get_parameter(addr.value()); }
+  friend auto params64(src_wrapper const& addr) {
+    return addr.ctx_->make_u64(addr.ctx_->get_parameter(addr.value()), addr.ctx_->get_parameter(addr.value() + 4));
+  }
 };
 
 template<typename... Operands, size_t... Idx, typename Context>
@@ -100,8 +120,11 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
   auto verify_operand = [&ctx](auto desc_ptr, auto& op) {
     using namespace operand_descriptors;
     using desc = std::remove_pointer_t<decltype(desc_ptr)>;
-    if constexpr (!std::is_same_v<desc, dst_reg_t>) {
+    if constexpr (!std::is_same_v<desc, dst_reg_t> && !std::is_same_v<desc, dst_reg2_t>) {
       if (!op.is_valid(ctx)) { return false; }
+    }
+    if constexpr (std::is_same_v<desc, reg2_t>) {
+      if (!op.is_register() || !op.is_valid64(ctx)) { return false; }
     }
     if constexpr (!allows_immediates<desc>) {
       if (op.is_immediate()) { return false; }
@@ -109,7 +132,9 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
     if constexpr (!allows_parameters<desc>) {
       if (op.is_parameter()) { return false; }
     }
-    if constexpr (is_parameter_address<desc>) {
+    if constexpr (is_double_parameter_address<desc>) {
+      if (!ctx.is_valid_parameter64(op.get(ctx))) { return false; }
+    } else if constexpr (is_parameter_address<desc>) {
       if (!ctx.is_valid_parameter(op.get(ctx))) { return false; }
     }
     return true;
