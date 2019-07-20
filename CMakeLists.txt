@@ -42,6 +42,7 @@ add_library(sopt-lib
   src/uarch/example.cpp
 
   src/evaluation.cpp
+  src/mutate.cpp
   src/optimizer.cpp
   src/smt.cpp
 )

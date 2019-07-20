@@ -186,12 +186,19 @@ public:
   virtual bool evaluate(evaluation_context& ctx, std::vector<operand>& operands) = 0;
   virtual void emit_smt(smt_context& ctx, std::vector<operand>& operands) = 0;
 
+  virtual void update_defined_registers(std::vector<operand> const& operands,
+                                        std::vector<bool>& defined_registers) const = 0;
+
   friend std::ostream& operator<<(std::ostream& os, opcode const& op) { return os << op.name_; }
 };
 
 struct instruction {
   opcode* opcode_;
   std::vector<operand> operands_;
+
+  void update_defined_registers(std::vector<bool>& registers) const {
+    opcode_->update_defined_registers(operands_, registers);
+  }
 
   friend std::ostream& operator<<(std::ostream& os, instruction const& inst) {
     fmt::print(os, "{} {}", *inst.opcode_, fmt::join(inst.operands_, ", "));

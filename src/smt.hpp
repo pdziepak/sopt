@@ -22,6 +22,9 @@
 
 #include <z3++.h>
 
+namespace uarch {
+class uarch;
+}
 class basic_block;
 
 template<typename Range> z3::expr make_and(z3::context& ctx, Range&& r) {
@@ -49,7 +52,8 @@ class smt_context {
 public:
   using value_type = z3::expr;
 
-  explicit smt_context(z3::context& z3ctx, std::unordered_map<uint64_t, z3::expr> const& params = {});
+  explicit smt_context(uarch::uarch const& ua, z3::context& z3ctx,
+                       std::unordered_map<uint64_t, z3::expr> const& params = {});
 
   z3::expr get_register(unsigned r) const;
   void set_register(unsigned r, z3::expr v);
@@ -67,7 +71,7 @@ public:
   static std::tuple<z3::expr, z3::expr> split_u64(z3::expr v);
 };
 
-std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(z3::context& z3ctx, basic_block& bb,
+std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
                                                      std::unordered_map<uint64_t, z3::expr> const& params,
                                                      std::vector<std::pair<unsigned, z3::expr>> const& in,
                                                      std::vector<unsigned> const& out);

@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
       ++failed;
       return;
     }
-    if (!equivalent(ifce, actual_output, expected_output)) {
+    if (!equivalent(*uarch, ifce, actual_output, expected_output)) {
       spdlog::error("actual output not equivalent to expected output\nactual:\n{}\nexpected:\n{}", actual_output,
                     expected_output);
       ++failed;

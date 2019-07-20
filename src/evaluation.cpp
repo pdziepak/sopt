@@ -20,9 +20,10 @@
 #include <range/v3/view.hpp>
 
 #include "instruction.hpp"
+#include "uarch/uarch.hpp"
 
-evaluation_context::evaluation_context(std::unordered_map<uint64_t, uint64_t> const& params)
-    : parameters_(params), registers_(9), defined_registers_(9) {
+evaluation_context::evaluation_context(uarch::uarch const& ua, std::unordered_map<uint64_t, uint64_t> const& params)
+    : parameters_(params), registers_(ua.gp_registers()), defined_registers_(ua.gp_registers()) {
 }
 
 uint64_t evaluation_context::get_register(unsigned r) const {
@@ -56,10 +57,11 @@ std::tuple<uint32_t, uint32_t> evaluation_context::split_u64(uint64_t v) {
   return {uint32_t(v), uint32_t(v >> 32)};
 }
 
-std::optional<std::vector<uint64_t>> evaluate(basic_block& bb, std::unordered_map<uint64_t, uint64_t> const& params,
+std::optional<std::vector<uint64_t>> evaluate(uarch::uarch const& ua, basic_block& bb,
+                                              std::unordered_map<uint64_t, uint64_t> const& params,
                                               std::vector<std::pair<unsigned, uint64_t>> in,
                                               std::vector<unsigned> const& out) {
-  auto ctx = evaluation_context(params);
+  auto ctx = evaluation_context(ua, params);
   for (auto [reg, val] : in) { ctx.set_register(reg, val); }
   for (auto& inst : bb.instructions_) {
     if (!inst.opcode_->evaluate(ctx, inst.operands_)) { return {}; }

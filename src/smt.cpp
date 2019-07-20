@@ -19,9 +19,12 @@
 #include <range/v3/view.hpp>
 
 #include "instruction.hpp"
+#include "uarch/uarch.hpp"
 
-smt_context::smt_context(z3::context& z3ctx, std::unordered_map<uint64_t, z3::expr> const& params)
-    : z3_(z3ctx), parameters_(params), registers_(9, z3_.int_val(0)), extra_restrictions_(z3_.bool_val(true)) {
+smt_context::smt_context(uarch::uarch const& ua, z3::context& z3ctx,
+                         std::unordered_map<uint64_t, z3::expr> const& params)
+    : z3_(z3ctx), parameters_(params), registers_(ua.gp_registers(), z3_.int_val(0)),
+      extra_restrictions_(z3_.bool_val(true)) {
 }
 
 z3::expr smt_context::get_register(unsigned r) const {
@@ -72,13 +75,13 @@ std::tuple<z3::expr, z3::expr> smt_context::split_u64(z3::expr v) {
   return {v.extract(31, 0), v.extract(63, 32)};
 }
 
-std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(z3::context& z3ctx, basic_block& bb,
+std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
                                                      std::unordered_map<uint64_t, z3::expr> const& params,
                                                      std::vector<std::pair<unsigned, z3::expr>> const& in,
                                                      std::vector<unsigned> const& out) {
   // FIXME: const correctness
 
-  auto ctx = smt_context(z3ctx, params);
+  auto ctx = smt_context(ua, z3ctx, params);
   for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
   for (auto& inst : bb.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
   return {out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |

@@ -21,6 +21,9 @@
 #include <unordered_map>
 #include <vector>
 
+namespace uarch {
+class uarch;
+}
 class basic_block;
 
 class evaluation_context {
@@ -32,7 +35,7 @@ class evaluation_context {
 public:
   using value_type = uint64_t;
 
-  explicit evaluation_context(std::unordered_map<uint64_t, uint64_t> const& params);
+  explicit evaluation_context(uarch::uarch const& ua, std::unordered_map<uint64_t, uint64_t> const& params);
 
   uint64_t get_register(unsigned r) const;
   void set_register(unsigned r, uint64_t v);
@@ -46,6 +49,7 @@ public:
   static std::tuple<uint32_t, uint32_t> split_u64(uint64_t v);
 };
 
-std::optional<std::vector<uint64_t>> evaluate(basic_block& bb, std::unordered_map<uint64_t, uint64_t> const& params,
+std::optional<std::vector<uint64_t>> evaluate(uarch::uarch const& ua, basic_block& bb,
+                                              std::unordered_map<uint64_t, uint64_t> const& params,
                                               std::vector<std::pair<unsigned, uint64_t>> in,
                                               std::vector<unsigned> const& out);

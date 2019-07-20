@@ -18,6 +18,7 @@
 
 #include <list>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 #include "instruction.hpp"
@@ -25,12 +26,18 @@
 namespace uarch {
 
 class uarch {
+  unsigned gp_registers_ = 0;
+  std::optional<unsigned> zero_gp_register_;
+
   std::vector<std::unique_ptr<opcode>> all_opcodes_;
   std::unordered_map<std::string_view, opcode*> opcode_by_name_;
 
   friend class uarch_builder;
 
 public:
+  unsigned gp_registers() const { return gp_registers_; }
+  std::optional<unsigned> zero_gp_register() const { return zero_gp_register_; }
+
   std::vector<std::unique_ptr<opcode>> const& all_opcodes() const { return all_opcodes_; }
 
   opcode* get_opcode(std::string_view op) const { return opcode_by_name_.at(op); }
@@ -186,6 +193,15 @@ public:
 public:
   uarch_builder() : uarch_(std::make_unique<uarch>()) {}
 
+  uarch_builder&& gp_registers(unsigned n) && {
+    uarch_->gp_registers_ = n;
+    return std::move(*this);
+  }
+  uarch_builder&& zero_gp_register(unsigned idx) && {
+    uarch_->zero_gp_register_ = idx;
+    return std::move(*this);
+  }
+
   template<typename... Operands, typename Function>
   uarch_builder&& operator()(std::string_view name, operands<Operands...>, Function&& fn) && {
     using ops = operands<Operands...>;
@@ -203,6 +219,13 @@ public:
 
       virtual void emit_smt(smt_context& ctx, std::vector<operand>& operands) override {
         ops::apply(*static_cast<Function*>(this), ctx, operands);
+      }
+
+      virtual void update_defined_registers(std::vector<operand> const& operands, std::vector<bool>& defined_registers) const override {
+        assert(!operands.empty());
+        assert(operands[0].is_register());
+        assert(operands[0].get_register_id() < defined_registers.size());
+        defined_registers[operands[0].get_register_id()] = true;
       }
     };
 

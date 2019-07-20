@@ -16,17 +16,11 @@
 
 #pragma once
 
-#include "instruction.hpp"
+#include <random>
+
 #include "uarch/uarch.hpp"
+#include "instruction.hpp"
 
-struct interface {
-  std::vector<uint64_t> parameters;
-  std::vector<unsigned> input_registers;
-  std::vector<unsigned> output_registers;
-};
+class interface;
 
-basic_block optimize(uarch::uarch const& ua, interface const&, basic_block, double score);
-
-double score_performance(basic_block const& bb);
-
-bool equivalent(uarch::uarch const& ua, interface const&, basic_block const& a, basic_block const& b);
+void mutate(uarch::uarch const& ua, std::default_random_engine& prng, interface const& ifce, basic_block& bb);
