@@ -23,15 +23,17 @@
 
 smt_context::smt_context(uarch::uarch const& ua, z3::context& z3ctx,
                          std::unordered_map<uint64_t, z3::expr> const& params)
-    : z3_(z3ctx), parameters_(params), registers_(ua.gp_registers(), z3_.int_val(0)),
+    : ua_(ua), z3_(z3ctx), parameters_(params), registers_(ua.gp_registers(), z3_.int_val(0)),
       extra_restrictions_(z3_.bool_val(true)) {
 }
 
 z3::expr smt_context::get_register(unsigned r) const {
+  if (ua_.zero_gp_register() == r) { return get_constant(0); }
   assert(r < registers_.size());
   return registers_[r];
 }
 void smt_context::set_register(unsigned r, z3::expr v) {
+  if (ua_.zero_gp_register() == r) { return; }
   assert(r < registers_.size());
   registers_[r] = v;
 }

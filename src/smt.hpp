@@ -40,6 +40,7 @@ template<typename Range> z3::expr make_or(z3::context& ctx, Range&& r) {
 }
 
 class smt_context {
+  uarch::uarch const& ua_;
   z3::context& z3_;
 
   std::unordered_map<uint64_t, z3::expr> parameters_;

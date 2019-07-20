@@ -23,20 +23,23 @@
 #include "uarch/uarch.hpp"
 
 evaluation_context::evaluation_context(uarch::uarch const& ua, std::unordered_map<uint64_t, uint64_t> const& params)
-    : parameters_(params), registers_(ua.gp_registers()), defined_registers_(ua.gp_registers()) {
+    : ua_(ua), parameters_(params), registers_(ua.gp_registers()), defined_registers_(ua.gp_registers()) {
 }
 
 uint64_t evaluation_context::get_register(unsigned r) const {
+  if (ua_.zero_gp_register() == r) { return 0; }
   assert(r < registers_.size());
   assert(defined_registers_[r]);
   return registers_[r];
 }
 void evaluation_context::set_register(unsigned r, uint64_t v) {
+  if (ua_.zero_gp_register() == r) { return; }
   assert(r < registers_.size());
   registers_[r] = v;
   defined_registers_[r] = true;
 }
 bool evaluation_context::is_register_defined(unsigned r) const {
+  if (ua_.zero_gp_register() == r) { return true; }
   return defined_registers_[r];
 }
 

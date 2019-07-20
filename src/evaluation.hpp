@@ -27,6 +27,7 @@ class uarch;
 class basic_block;
 
 class evaluation_context {
+  uarch::uarch const& ua_;
   std::unordered_map<uint64_t, uint64_t> parameters_;
 
   std::vector<uint64_t> registers_;
