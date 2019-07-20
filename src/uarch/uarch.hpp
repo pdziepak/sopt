@@ -221,7 +221,8 @@ public:
         ops::apply(*static_cast<Function*>(this), ctx, operands);
       }
 
-      virtual void update_defined_registers(std::vector<operand> const& operands, std::vector<bool>& defined_registers) const override {
+      virtual void update_defined_registers(std::vector<operand> const& operands,
+                                            std::vector<bool>& defined_registers) const override {
         assert(!operands.empty());
         assert(operands[0].is_register());
         assert(operands[0].get_register_id() < defined_registers.size());

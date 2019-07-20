@@ -33,6 +33,9 @@
 #include "smt.hpp"
 #include "stats.hpp"
 
+using test =
+    std::tuple<std::unordered_map<uint64_t, value>, std::vector<std::pair<unsigned, value>>, std::vector<value>>;
+
 bool has_unknown_immediates(basic_block const& bb) {
   for (auto& inst : bb.instructions_) {
     for (auto& op : inst.operands_) {
@@ -42,12 +45,11 @@ bool has_unknown_immediates(basic_block const& bb) {
   return false;
 }
 
-void synthesize_immediates(
-    uarch::uarch const& ua, z3::context& z3ctx, interface const& ifce,
-    std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
-                           std::vector<uint64_t>>> const& tests,
-    basic_block& candidate, std::unordered_map<uint64_t, z3::expr> const& params,
-    std::vector<std::pair<unsigned, z3::expr>> const& in, std::vector<z3::expr> const& target_smt, stats& st) {
+void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, interface const& ifce,
+                           std::vector<test> const& tests, basic_block& candidate,
+                           std::unordered_map<uint64_t, z3::expr> const& params,
+                           std::vector<std::pair<unsigned, z3::expr>> const& in,
+                           std::vector<z3::expr> const& target_smt, stats& st) {
   if (!has_unknown_immediates(candidate)) { return; }
 
   // FIXME: this is is_valid() actually
@@ -69,12 +71,12 @@ void synthesize_immediates(
         make_and(z3ctx,
                  ranges::view::concat(ranges::view::zip(params | ranges::view::values, paramv | ranges::view::values),
                                       ranges::view::zip(in | ranges::view::values, inv | ranges::view::values)) |
-                     ranges::view::transform([&](std::tuple<z3::expr, uint64_t> v) {
-                       return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v), 32);
+                     ranges::view::transform([&](std::tuple<z3::expr, value> v) {
+                       return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32);
                      })),
         make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
-                            ranges::view::transform([&](std::tuple<z3::expr, uint64_t> v) {
-                              return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v), 32);
+                            ranges::view::transform([&](std::tuple<z3::expr, value> v) {
+                              return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32);
                             })) &&
             candidate_extra_smt));
   }
@@ -93,11 +95,7 @@ void synthesize_immediates(
   if (z3slv.check() == z3::check_result::sat) { ctx.resolve_unknown_immediates(z3slv.get_model()); }
 }
 
-bool check_tests(
-    uarch::uarch const& ua, interface const& ifce,
-    std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
-                           std::vector<uint64_t>>> const& tests,
-    basic_block& bb) {
+bool check_tests(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb) {
   for (auto [param, in, out] : tests) {
     auto actual_out = evaluate(ua, bb, param, in, ifce.output_registers);
     if (!actual_out || actual_out != out) { return false; }
@@ -123,10 +121,7 @@ double score_performance(basic_block const& bb) {
   return cost_to_score(cost_performance(bb));
 }
 
-double score(uarch::uarch const& ua, interface const& ifce,
-             std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
-                                    std::vector<uint64_t>>> const& tests,
-             basic_block& bb) {
+double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb) {
   double cost = 0;
 
   for (auto [param, in, out] : tests) {
@@ -180,9 +175,9 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   spdlog::info("optimizing basic block, inputs: {}, outputs: {}\n{}", ifce.input_registers, ifce.output_registers,
                target);
 
-  static constexpr std::array<uint64_t, 5> initial_tests = {uint64_t(-2), uint64_t(-1), 0, 1, 2};
+  static constexpr std::array<value, 5> initial_tests = {value(-2), value(-1), value(0), value(1), value(2)};
   spdlog::debug("preparing {} tests...", initial_tests.size());
-  auto tests = initial_tests | ranges::view::transform([&](uint64_t v) {
+  auto tests = initial_tests | ranges::view::transform([&](value v) {
                  auto params = ifce.parameters | ranges::view::transform([&](uint64_t p) { return std::pair(p, v); }) |
                                ranges::to<std::unordered_map>();
                  auto in = ifce.input_registers | ranges::view::transform([&](unsigned r) { return std::pair(r, v); }) |
@@ -267,14 +262,14 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
                         auto e = z3slv.get_model().eval(std::get<1>(in));
                         uint64_t v;
                         if (!e.is_numeral_u64(v)) { v = 0; }
-                        return std::pair(std::get<0>(in), v);
+                        return std::pair(std::get<0>(in), value(v));
                       }) |
                       ranges::to<std::unordered_map>();
         auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
                      auto e = z3slv.get_model().eval(std::get<1>(in));
                      uint64_t v;
                      if (!e.is_numeral_u64(v)) { v = 0; }
-                     return std::pair(std::get<0>(in), v);
+                     return std::pair(std::get<0>(in), value(v));
                    }) |
                    ranges::to<std::vector>();
         auto outv = evaluate(ua, best, paramv, inv, ifce.output_registers).value();

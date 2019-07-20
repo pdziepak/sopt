@@ -35,29 +35,29 @@ private:
   bool known_ = true;
 
 public:
-  uint64_t get(evaluation_context const& ctx) const {
+  value get(evaluation_context const& ctx) const {
     assert(is_valid(ctx));
     switch (type_) {
     case type::reg: return ctx.get_register(value_);
-    case type::imm: return value_;
-    case type::param: return ctx.get_parameter(value_);
+    case type::imm: return known_ ? value(value_) : value();
+    case type::param: return ctx.get_parameter(value(value_));
     }
     abort();
   }
-  uint64_t get_hi(evaluation_context const& ctx) const {
+  value get_hi(evaluation_context const& ctx) const {
     assert(is_valid(ctx));
     switch (type_) {
     case type::reg: return ctx.get_register(value_ + 1);
     case type::imm: abort();
-    case type::param: return ctx.get_parameter(value_ + 4);
+    case type::param: return ctx.get_parameter(value(value_ + 4));
     }
     abort();
   }
-  void set(evaluation_context& ctx, uint64_t v) const {
+  void set(evaluation_context& ctx, value v) const {
     assert(type_ == type::reg);
     ctx.set_register(value_, v);
   }
-  void set_hi(evaluation_context& ctx, uint64_t v) const {
+  void set_hi(evaluation_context& ctx, value v) const {
     assert(type_ == type::reg);
     ctx.set_register(value_ + 1, v);
   }
