@@ -31,6 +31,7 @@
 #include "mutate.hpp"
 #include "optimizer.hpp"
 #include "smt.hpp"
+#include "stats.hpp"
 
 bool has_unknown_immediates(basic_block const& bb) {
   for (auto& inst : bb.instructions_) {
@@ -46,7 +47,7 @@ void synthesize_immediates(
     std::vector<std::tuple<std::unordered_map<uint64_t, uint64_t>, std::vector<std::pair<unsigned, uint64_t>>,
                            std::vector<uint64_t>>> const& tests,
     basic_block& candidate, std::unordered_map<uint64_t, z3::expr> const& params,
-    std::vector<std::pair<unsigned, z3::expr>> const& in, std::vector<z3::expr> const& target_smt, uint64_t& queries) {
+    std::vector<std::pair<unsigned, z3::expr>> const& in, std::vector<z3::expr> const& target_smt, stats& st) {
   if (!has_unknown_immediates(candidate)) { return; }
 
   // FIXME: this is is_valid() actually
@@ -77,7 +78,7 @@ void synthesize_immediates(
                             })) &&
             candidate_extra_smt));
   }
-  ++queries;
+  st.on_smt_query();
   if (z3slv.check() != z3::check_result::sat) { return; }
 
   assert(candidate_smt.size() == target_smt.size());
@@ -88,7 +89,7 @@ void synthesize_immediates(
   }
   for (auto&& [a, b] : ranges::view::zip(candidate_smt, target_smt)) { z3slv.add(z3::forall(in_param_expr, a == b)); }
   z3slv.add(z3::forall(in_param_expr, candidate_extra_smt));
-  ++queries;
+  st.on_smt_query();
   if (z3slv.check() == z3::check_result::sat) { ctx.resolve_unknown_immediates(z3slv.get_model()); }
 }
 
@@ -214,26 +215,26 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   auto prng = std::default_random_engine{std::random_device{}()};
 
   auto start = std::chrono::steady_clock::now();
-  uint64_t candidates_total = 0;
-  uint64_t solver_queries = 0;
+  auto total_stats = stats{};
+  auto tick_stats = stats{};
 
   auto trace_tick = start + std::chrono::seconds(1);
-  size_t candidates_tick = 0;
+
   while (best_score < min_score) {
     auto now = std::chrono::steady_clock::now();
     if (now > trace_tick) {
-      spdlog::trace("considered {} candidates, best score: {}", candidates_tick, best_score);
+      spdlog::trace("tick, best score: {}, {}", best_score, tick_stats);
+      total_stats += tick_stats;
+      tick_stats = {};
       trace_tick = now + std::chrono::seconds(1);
-      candidates_tick = 0;
     }
 
-    ++candidates_tick;
-    ++candidates_total;
+    tick_stats.on_new_candidate();
 
     auto candidate = target;
     mutate(ua, prng, ifce, candidate);
 
-    synthesize_immediates(ua, z3ctx, ifce, tests, candidate, param, in, target_smt, solver_queries);
+    synthesize_immediates(ua, z3ctx, ifce, tests, candidate, param, in, target_smt, tick_stats);
 
     auto candidate_score = score(ua, ifce, tests, candidate);
     auto alpha = std::min(1., candidate_score / target_score);
@@ -249,7 +250,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
     if (check_tests(ua, ifce, tests, target)) {
       auto [candidate_smt, candidate_extra_smt] = emit_smt(ua, z3ctx, candidate, param, in, ifce.output_registers);
 
-      ++solver_queries;
+      tick_stats.on_smt_query();
 
       z3::solver z3slv(z3ctx);
       z3slv.add(make_or(z3ctx, ranges::view::zip(candidate_smt, target_smt) | ranges::view::transform([](auto c_t) {
@@ -285,10 +286,11 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
     }
   }
 
+  total_stats += tick_stats;
+
   auto elapsed_time =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1'000.;
-  spdlog::info("finished with score {} after {} seconds, tried {} candidates, did {} solver queries\n{}", best_score,
-               elapsed_time, candidates_total, solver_queries, best);
+  spdlog::info("finished with score {} after {} seconds: {}\n{}", best_score, elapsed_time, total_stats, best);
 
   return best;
 }
