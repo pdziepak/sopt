@@ -27,33 +27,9 @@
 #include <range/v3/core.hpp>
 #include <range/v3/view.hpp>
 
+#include "evaluation.hpp"
 #include "optimizer.hpp"
-
-std::optional<std::vector<uint64_t>> evaluate(basic_block& bb, std::unordered_map<uint64_t, uint64_t> const& params,
-                                              std::vector<std::pair<unsigned, uint64_t>> in,
-                                              std::vector<unsigned> const& out) {
-  auto ctx = evaluation_context(params);
-  for (auto [reg, val] : in) { ctx.set_register(reg, val); }
-  for (auto& inst : bb.instructions_) {
-    if (!inst.opcode_->evaluate(ctx, inst.operands_)) { return {}; }
-  }
-  if (ranges::any_of(out, [&](unsigned reg) { return !ctx.is_register_defined(reg); })) { return {}; }
-  return out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg); }) | ranges::to<std::vector>();
-}
-
-std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(z3::context& z3ctx, basic_block& bb,
-                                                     std::unordered_map<uint64_t, z3::expr> const& params,
-                                                     std::vector<std::pair<unsigned, z3::expr>> const& in,
-                                                     std::vector<unsigned> const& out) {
-  // FIXME: const correctness
-
-  auto ctx = smt_context(z3ctx, params);
-  for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
-  for (auto& inst : bb.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
-  return {out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
-              ranges::to<std::vector>(),
-          ctx.extra_restrictions()};
-}
+#include "smt.hpp"
 
 opcode* random_opcode(uarch::uarch const& ua, std::default_random_engine& prng) {
   auto& opcodes = ua.all_opcodes();

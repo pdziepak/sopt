@@ -20,12 +20,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fmt/format.h>
-#include <fmt/ostream.h>
-
-#include <range/v3/view.hpp>
-
 #include <z3++.h>
+
+class basic_block;
 
 template<typename Range> z3::expr make_and(z3::context& ctx, Range&& r) {
   auto expr = z3::expr_vector(ctx);
@@ -52,46 +49,25 @@ class smt_context {
 public:
   using value_type = z3::expr;
 
-  explicit smt_context(z3::context& z3ctx, std::unordered_map<uint64_t, z3::expr> const& params = {})
-      : z3_(z3ctx), parameters_(params), registers_(9, z3_.int_val(0)), extra_restrictions_(z3_.bool_val(true)) {}
+  explicit smt_context(z3::context& z3ctx, std::unordered_map<uint64_t, z3::expr> const& params = {});
 
-  z3::expr get_register(unsigned r) const {
-    assert(r < registers_.size());
-    return registers_[r];
-  }
-  void set_register(unsigned r, z3::expr v) {
-    assert(r < registers_.size());
-    registers_[r] = v;
-  }
+  z3::expr get_register(unsigned r) const;
+  void set_register(unsigned r, z3::expr v);
 
-  z3::expr get_parameter(uint64_t p) const { return parameters_.at(p); }
-  z3::expr get_parameter(z3::expr p) {
-    auto current = get_constant(0); // TODO: poison?
-    for (auto [k, v] : parameters_) { current = z3::ite(p == get_constant(k), v, std::move(current)); }
-    extra_restrictions_ = std::move(extra_restrictions_) &&
-                          make_or(z3_, parameters_ | ranges::view::keys |
-                                           ranges::view::transform([&](uint64_t k) { return p == get_constant(k); }));
-    return current;
-  }
+  z3::expr get_parameter(uint64_t p) const;
+  z3::expr get_parameter(z3::expr p);
 
-  z3::expr get_constant(uint64_t v) const { return z3_.bv_val(v, 32); }
+  z3::expr get_constant(uint64_t v) const;
 
-  z3::expr add_unknown_immediate(std::function<void(uint64_t)> fn) {
-    return std::get<0>(unknown_immediates_.emplace_back(
-        z3_.bv_const(fmt::format("imm{}", unknown_immediates_.size()).c_str(), 32), fn));
-  }
-  void resolve_unknown_immediates(z3::model const& mdl) {
-    for (auto& [expr, fn] : unknown_immediates_) {
-      auto e = mdl.eval(expr);
-      uint64_t v;
-      if (e.is_numeral_u64(v)) { fn(e.get_numeral_uint64()); }
-    }
-  }
+  z3::expr add_unknown_immediate(std::function<void(uint64_t)> fn);
+  void resolve_unknown_immediates(z3::model const& mdl);
+  z3::expr extra_restrictions() const;
 
-  z3::expr extra_restrictions() const { return extra_restrictions_; }
-
-  static z3::expr make_u64(z3::expr const& lo, z3::expr const& hi) {
-    return z3::shl(z3::zext(hi, 32), 32) | z3::zext(lo, 32);
-  }
-  static std::tuple<z3::expr, z3::expr> split_u64(z3::expr v) { return {v.extract(31, 0), v.extract(63, 32)}; }
+  static z3::expr make_u64(z3::expr const& lo, z3::expr const& hi);
+  static std::tuple<z3::expr, z3::expr> split_u64(z3::expr v);
 };
+
+std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(z3::context& z3ctx, basic_block& bb,
+                                                     std::unordered_map<uint64_t, z3::expr> const& params,
+                                                     std::vector<std::pair<unsigned, z3::expr>> const& in,
+                                                     std::vector<unsigned> const& out);

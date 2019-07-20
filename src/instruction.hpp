@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+
 #include "evaluation.hpp"
 #include "smt.hpp"
 

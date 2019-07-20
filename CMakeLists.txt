@@ -41,7 +41,9 @@ find_package(spdlog REQUIRED)
 add_library(sopt-lib
   src/uarch/example.cpp
 
+  src/evaluation.cpp
   src/optimizer.cpp
+  src/smt.cpp
 )
 target_include_directories(sopt-lib PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
