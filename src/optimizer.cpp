@@ -146,13 +146,7 @@ double cost_to_score(double cost) {
 }
 
 double cost_performance(basic_block const& bb) {
-  std::unordered_set<uint64_t> registers;
-  for (auto& inst : bb.instructions_) {
-    for (auto& op : inst.operands_) {
-      if (op.is_register()) { registers.emplace(op.get_register_id()); }
-    }
-  }
-  return (bb.instructions_.size() + registers.size()) * 0.12;
+  return bb.instructions_.size();
 }
 
 double score_performance(basic_block const& bb) {
