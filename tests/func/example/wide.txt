@@ -28,5 +28,15 @@ ld.param.64 r0, r0
 mov r2, r0
 mov r3, r1
 > r2 r3
-mov r2, 0x0
-ld.param.64 r2, r2
+ld.param.64 r2, r15
+
+# Merge regular loads into wide
+< p[0] p[4] r0 r1
+mov r2, 0
+add r3, r2, 4
+ld.param r2, r2
+ld.param r3, r3
+add.64 r0, r0, r2
+> r0 r1
+ld.param.64 r2, r15
+add.64 r0, r0, r2
