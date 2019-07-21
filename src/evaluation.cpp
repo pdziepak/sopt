@@ -44,6 +44,7 @@ value evaluation_context::get_register(unsigned r) const {
 void evaluation_context::set_register(unsigned r, value v) {
   if (ua_.zero_gp_register() == r) { return; }
   assert(r < registers_.size());
+  v.trim();
   registers_[r] = v;
   defined_registers_[r] = true;
 }

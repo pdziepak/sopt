@@ -40,3 +40,13 @@ add.64 r0, r0, r2
 > r0 r1
 ld.param.64 r2, r15
 add.64 r0, r0, r2
+
+# Unnecessary 64-bit operation
+< r1 r2 r3 r4
+mov r0, r2
+mov r5, r4
+add.64 r1, r1, r3
+mov r2, r0
+mov r4, r5
+> r1 r2 r3 r4
+add r1, r1, r3

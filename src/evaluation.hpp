@@ -36,6 +36,11 @@ public:
 
   constexpr bool is_undefined() const { return !defined_; }
 
+  void trim() {
+    if (!is_undefined()) {
+      integer_ = uint32_t(integer_);
+    }
+  }
   constexpr uint32_t as_i32() const {
     assert(!is_undefined());
     return integer_;

@@ -207,7 +207,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   spdlog::info("optimizing basic block, inputs: {}, outputs: {}\n{}", ifce.input_registers, ifce.output_registers,
                target);
 
-  static constexpr std::array<value, 5> initial_tests = {value(-2), value(-1), value(0), value(1), value(2)};
+  static constexpr std::array<value, 5> initial_tests = {value(uint32_t(-2)), value(uint32_t(-1)), value(0), value(1), value(2)};
   spdlog::debug("preparing {} tests...", initial_tests.size());
   auto tests = initial_tests | ranges::view::transform([&](value v) {
                  auto params = ifce.parameters | ranges::view::transform([&](uint64_t p) { return std::pair(p, v); }) |
