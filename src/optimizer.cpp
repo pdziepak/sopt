@@ -230,8 +230,8 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
                }) |
                ranges::to<std::unordered_map>();
   auto [target_smt, target_extra_smt] = emit_smt(ua, z3ctx, target, param, in, ifce.output_registers);
-  for (auto& tsmt : target_smt) { tsmt.simplify(); }
-  target_extra_smt.simplify();
+  for (auto& tsmt : target_smt) { tsmt = tsmt.simplify(); }
+  target_extra_smt = target_extra_smt.simplify();
   spdlog::debug("target smt formulae: {} and {}", fmt::join(ranges::view::zip(ifce.output_registers, target_smt), ", "),
                 target_extra_smt);
 
