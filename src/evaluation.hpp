@@ -62,6 +62,9 @@ public:
   friend bool operator==(value const& a, value const& b) {
     return a.defined_ == b.defined_ && a.integer_ == b.integer_;
   }
+  friend bool operator!=(value const& a, value const& b) {
+    return !(a == b);
+  }
 
   friend std::ostream& operator<<(std::ostream&, value const&);
 };

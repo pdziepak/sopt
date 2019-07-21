@@ -164,10 +164,10 @@ double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> co
 
   for (auto [param, in, out] : tests) {
     auto actual_out = evaluate(ua, bb, param, in, ifce.output_registers);
-    if (!actual_out) {
-      cost += 4;
-    } else if (actual_out != out) {
-      cost += 1;
+    for (auto idx = 0u; idx < out.size(); ++idx) {
+      if (!actual_out || (*actual_out)[idx] != out[idx]) {
+        cost += 1;
+      }
     }
   }
 
