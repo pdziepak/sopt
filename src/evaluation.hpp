@@ -71,7 +71,7 @@ public:
 
 class evaluation_context {
   uarch::uarch const& ua_;
-  std::unordered_map<uint64_t, value> parameters_;
+  std::unordered_map<uint64_t, value> const& parameters_;
 
   std::vector<value> registers_;
   std::vector<bool> defined_registers_;
@@ -95,5 +95,5 @@ public:
 
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
                                            std::unordered_map<uint64_t, value> const& params,
-                                           std::vector<std::pair<unsigned, value>> in,
+                                           std::vector<std::pair<unsigned, value>> const& in,
                                            std::vector<unsigned> const& out);

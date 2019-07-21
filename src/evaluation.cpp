@@ -75,7 +75,7 @@ std::tuple<value, value> evaluation_context::split_u64(value v) {
 
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
                                            std::unordered_map<uint64_t, value> const& params,
-                                           std::vector<std::pair<unsigned, value>> in,
+                                           std::vector<std::pair<unsigned, value>> const& in,
                                            std::vector<unsigned> const& out) {
   auto ctx = evaluation_context(ua, params);
   for (auto [reg, val] : in) { ctx.set_register(reg, val); }
