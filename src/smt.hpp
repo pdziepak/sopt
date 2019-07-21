@@ -27,16 +27,18 @@ class uarch;
 }
 class basic_block;
 
-template<typename Range> z3::expr make_and(z3::context& ctx, Range&& r) {
+template<typename Range> z3::expr_vector make_vector(z3::context& ctx, Range&& r) {
   auto expr = z3::expr_vector(ctx);
   for (auto&& e : r) { expr.push_back(e); }
-  return z3::mk_and(expr);
+  return expr;
+}
+
+template<typename Range> z3::expr make_and(z3::context& ctx, Range&& r) {
+  return z3::mk_and(make_vector(ctx, std::forward<Range>(r)));
 }
 
 template<typename Range> z3::expr make_or(z3::context& ctx, Range&& r) {
-  auto expr = z3::expr_vector(ctx);
-  for (auto&& e : r) { expr.push_back(e); }
-  return z3::mk_or(expr);
+  return z3::mk_or(make_vector(ctx, std::forward<Range>(r)));
 }
 
 class smt_context {

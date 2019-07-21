@@ -45,54 +45,92 @@ bool has_unknown_immediates(basic_block const& bb) {
   return false;
 }
 
-void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, interface const& ifce,
-                           std::vector<test> const& tests, basic_block& candidate,
+void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solver& z3slv, interface const& ifce,
+                           std::vector<test>& tests, basic_block& candidate,
                            std::unordered_map<uint64_t, z3::expr> const& params,
-                           std::vector<std::pair<unsigned, z3::expr>> const& in,
+                           std::vector<std::pair<unsigned, z3::expr>> const& in, basic_block& target,
                            std::vector<z3::expr> const& target_smt, stats& st) {
   if (!has_unknown_immediates(candidate)) { return; }
 
   // FIXME: this is is_valid() actually
   auto ret = evaluate(ua, candidate, std::get<0>(tests.front()), std::get<1>(tests.front()), ifce.output_registers);
   if (!ret) { return; }
+  if (ranges::none_of(*ret, std::mem_fn(&value::is_undefined))) { return; }
 
   // FIXME: emit_smt
   auto ctx = smt_context(ua, z3ctx, params);
   for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
   for (auto& inst : candidate.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
-  auto candidate_smt = ifce.output_registers |
-                       ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
-                       ranges::to<std::vector>();
-  auto candidate_extra_smt = ctx.extra_restrictions();
+  auto original_candidate_smt =
+      ifce.output_registers | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
+      ranges::to<std::vector>();
+  auto original_candidate_extra_smt = ctx.extra_restrictions();
 
-  z3::solver z3slv(z3ctx);
-  for (auto [paramv, inv, outv] : tests) {
-    z3slv.add(z3::implies(
-        make_and(z3ctx,
-                 ranges::view::concat(ranges::view::zip(params | ranges::view::values, paramv | ranges::view::values),
-                                      ranges::view::zip(in | ranges::view::values, inv | ranges::view::values)) |
-                     ranges::view::transform([&](std::tuple<z3::expr, value> v) {
-                       return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32);
-                     })),
-        make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
-                            ranges::view::transform([&](std::tuple<z3::expr, value> v) {
-                              return std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32);
-                            })) &&
-            candidate_extra_smt));
-  }
-  st.on_smt_query();
-  if (z3slv.check() != z3::check_result::sat) { return; }
+  auto original_candidate = candidate;
 
-  assert(candidate_smt.size() == target_smt.size());
+  auto vars = make_vector(z3ctx, ranges::view::concat(params | ranges::view::values, in | ranges::view::values));
 
-  auto in_param_expr = z3::expr_vector(z3ctx);
-  for (auto&& expr : ranges::view::concat(params | ranges::view::values, in | ranges::view::values)) {
-    in_param_expr.push_back(expr);
-  }
-  for (auto&& [a, b] : ranges::view::zip(candidate_smt, target_smt)) { z3slv.add(z3::forall(in_param_expr, a == b)); }
-  z3slv.add(z3::forall(in_param_expr, candidate_extra_smt));
-  st.on_smt_query();
-  if (z3slv.check() == z3::check_result::sat) { ctx.resolve_unknown_immediates(z3slv.get_model()); }
+  do {
+    candidate = original_candidate;
+    auto candidate_smt = original_candidate_smt;
+    auto candidate_extra_smt = original_candidate_extra_smt;
+
+    z3slv.reset();
+
+    for (auto& [paramv, inv, outv] : tests) {
+      auto vals =
+          make_vector(z3ctx, ranges::view::concat(paramv | ranges::view::values, inv | ranges::view::values) |
+                                 ranges::view::transform([&](value const& v) { return z3ctx.bv_val(v.as_i32(), 32); }));
+      auto cnd = (make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
+                                      ranges::view::transform([&](std::tuple<z3::expr, value> v) {
+                                        return (std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32));
+                                      })) &&
+                  candidate_extra_smt);
+      z3slv.add(cnd.substitute(vars, vals));
+    }
+
+    st.on_smt_query();
+    if (z3slv.check() != z3::check_result::sat) { return; }
+
+    assert(candidate_smt.size() == target_smt.size());
+    ctx.resolve_unknown_immediates(z3slv.get_model());
+
+    auto ctx = smt_context(ua, z3ctx, params);
+    for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
+    for (auto& inst : candidate.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
+    candidate_smt = ifce.output_registers |
+                    ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
+                    ranges::to<std::vector>();
+    candidate_extra_smt = ctx.extra_restrictions();
+
+    z3slv.reset();
+    z3slv.add(make_or(z3ctx, ranges::view::zip(candidate_smt, target_smt) | ranges::view::transform([&](auto&& a_b) {
+                               return std::get<0>(a_b) != std::get<1>(a_b);
+                             })));
+    st.on_smt_query();
+    auto result = z3slv.check();
+    if (result == z3::check_result::unsat) {
+      return;
+    } else {
+      auto paramv = params | ranges::view::transform([&](std::pair<uint64_t, z3::expr> in) {
+                      auto e = z3slv.get_model().eval(std::get<1>(in));
+                      uint64_t v;
+                      if (!e.is_numeral_u64(v)) { v = 0; }
+                      return std::pair(std::get<0>(in), value(v));
+                    }) |
+                    ranges::to<std::unordered_map>();
+      auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
+                   auto e = z3slv.get_model().eval(std::get<1>(in));
+                   uint64_t v;
+                   if (!e.is_numeral_u64(v)) { v = 0; }
+                   return std::pair(std::get<0>(in), value(v));
+                 }) |
+                 ranges::to<std::vector>();
+      auto outv = evaluate(ua, target, paramv, inv, ifce.output_registers).value();
+      spdlog::trace("adding test case (constant synthesis): ({}, {}, {})", paramv, inv, outv);
+      tests.emplace_back(paramv, inv, outv);
+    }
+  } while (true);
 }
 
 bool check_tests(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb) {
@@ -198,6 +236,8 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
                }) |
                ranges::to<std::unordered_map>();
   auto [target_smt, target_extra_smt] = emit_smt(ua, z3ctx, target, param, in, ifce.output_registers);
+  for (auto& tsmt : target_smt) { tsmt.simplify(); }
+  target_extra_smt.simplify();
   spdlog::debug("target smt formulae: {} and {}", fmt::join(ranges::view::zip(ifce.output_registers, target_smt), ", "),
                 target_extra_smt);
 
@@ -215,6 +255,8 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
 
   auto trace_tick = start + std::chrono::seconds(1);
 
+  z3::solver z3slv(z3ctx);
+
   while (best_score < min_score) {
     auto now = std::chrono::steady_clock::now();
     if (now > trace_tick) {
@@ -229,7 +271,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
     auto candidate = target;
     mutate(ua, prng, ifce, candidate);
 
-    synthesize_immediates(ua, z3ctx, ifce, tests, candidate, param, in, target_smt, tick_stats);
+    synthesize_immediates(ua, z3ctx, z3slv, ifce, tests, candidate, param, in, best, target_smt, tick_stats);
 
     auto candidate_score = score(ua, ifce, tests, candidate);
     auto alpha = std::min(1., candidate_score / target_score);
@@ -247,7 +289,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
 
       tick_stats.on_smt_query();
 
-      z3::solver z3slv(z3ctx);
+      z3slv.reset();
       z3slv.add(make_or(z3ctx, ranges::view::zip(candidate_smt, target_smt) | ranges::view::transform([](auto c_t) {
                                  return std::get<0>(c_t) != std::get<1>(c_t);
                                })) ||
