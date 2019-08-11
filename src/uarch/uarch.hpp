@@ -79,6 +79,14 @@ template<typename A, typename B> auto operator|(A, B) {
 
 namespace detail {
 
+template<size_t N, typename... Operands> struct get_operand;
+template<size_t N, typename Operand, typename... Operands>
+struct get_operand<N, Operand, Operands...> : get_operand<N - 1, Operands...> {};
+template<typename Operand, typename... Operands> struct get_operand<0, Operand, Operands...> { using type = Operand; };
+
+template<size_t N, typename... Operands>
+using get_operand_t = typename get_operand<N, Operands...>::type;
+
 template<typename Operand> constexpr bool allows_immediates = std::is_base_of_v<operand_descriptors::imm_t, Operand>;
 template<typename Operand> constexpr bool allows_parameters = std::is_base_of_v<operand_descriptors::param_t, Operand>;
 template<typename Operand>
@@ -227,6 +235,13 @@ public:
         assert(operands[0].is_register());
         assert(operands[0].get_register_id() < defined_registers.size());
         defined_registers[operands[0].get_register_id()] = true;
+
+        // FIXME: use a trait for this
+        if constexpr (std::is_same_v<detail::get_operand_t<0, std::decay_t<Operands>...>, operand_descriptors::dst_reg2_t>) {
+          assert(operands[0].get_register_id() + 1 < defined_registers.size());
+
+          defined_registers[operands[0].get_register_id() + 1] = true;
+        }
       }
     };
 
