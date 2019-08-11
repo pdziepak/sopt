@@ -154,14 +154,15 @@ int main(int argc, char** argv) {
     auto expected_score = score_performance(expected_output);
     try {
       actual_output = optimize(*uarch, ifce, *input, expected_score);
+
+      if (!equivalent(*uarch, ifce, actual_output, expected_output)) {
+        spdlog::error("actual output not equivalent to expected output\nactual:\n{}\nexpected:\n{}", actual_output,
+                      expected_output);
+        ++failed;
+        return;
+      }
     } catch (z3::exception const& ex) {
       spdlog::error("z3 error: {}", ex);
-      ++failed;
-      return;
-    }
-    if (!equivalent(*uarch, ifce, actual_output, expected_output)) {
-      spdlog::error("actual output not equivalent to expected output\nactual:\n{}\nexpected:\n{}", actual_output,
-                    expected_output);
       ++failed;
       return;
     }
