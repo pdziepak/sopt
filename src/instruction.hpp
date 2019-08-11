@@ -35,36 +35,36 @@ private:
   bool known_ = true;
 
 public:
-  value get(evaluation_context const& ctx) const {
+  template<typename LaneType> value get(evaluation_context const& ctx, LaneType lane) const {
     assert(is_valid(ctx));
     switch (type_) {
-    case type::reg: return ctx.get_register(value_);
+    case type::reg: return ctx.get_register(value_, lane);
     case type::imm: return known_ ? value(value_) : value();
     case type::param: return ctx.get_parameter(value(value_));
     }
     abort();
   }
-  value get_hi(evaluation_context const& ctx) const {
+  value get_hi(evaluation_context const& ctx, unsigned lane) const {
     assert(is_valid(ctx));
     switch (type_) {
-    case type::reg: return ctx.get_register(value_ + 1);
+    case type::reg: return ctx.get_register(value_ + 1, lane);
     case type::imm: abort();
     case type::param: return ctx.get_parameter(value(value_ + 4));
     }
     abort();
   }
-  void set(evaluation_context& ctx, value v) const {
+  void set(evaluation_context& ctx, value v, unsigned lane) const {
     assert(type_ == type::reg);
-    ctx.set_register(value_, v);
+    ctx.set_register(value_, v, lane);
   }
-  void set_hi(evaluation_context& ctx, value v) const {
+  void set_hi(evaluation_context& ctx, value v, unsigned lane) const {
     assert(type_ == type::reg);
-    ctx.set_register(value_ + 1, v);
+    ctx.set_register(value_ + 1, v, lane);
   }
 
-  z3::expr get(smt_context& ctx) {
+  template<typename LaneType> z3::expr get(smt_context& ctx, LaneType lane) {
     switch (type_) {
-    case type::reg: return ctx.get_register(value_);
+    case type::reg: return ctx.get_register(value_, lane);
     case type::imm:
       if (known_) {
         return ctx.get_constant(value_);
@@ -78,21 +78,21 @@ public:
     }
     abort();
   }
-  z3::expr get_hi(smt_context& ctx) {
+  z3::expr get_hi(smt_context& ctx, unsigned lane) {
     switch (type_) {
-    case type::reg: return ctx.get_register(value_ + 1);
+    case type::reg: return ctx.get_register(value_ + 1, lane);
     case type::imm: abort();
     case type::param: return ctx.get_parameter(value_ + 4);
     }
     abort();
   }
-  void set(smt_context& ctx, z3::expr v) const {
+  void set(smt_context& ctx, z3::expr v, unsigned lane) const {
     assert(type_ == type::reg);
-    ctx.set_register(value_, v);
+    ctx.set_register(value_, v, lane);
   }
-  void set_hi(smt_context& ctx, z3::expr v) const {
+  void set_hi(smt_context& ctx, z3::expr v, unsigned lane) const {
     assert(type_ == type::reg);
-    ctx.set_register(value_ + 1, v);
+    ctx.set_register(value_ + 1, v, lane);
   }
 
   bool is_register() const { return type_ == type::reg; }
@@ -163,17 +163,24 @@ public:
 class opcode {
   std::string name_;
   unsigned operand_count_ = 0;
+  std::vector<bool> registers_;
   std::vector<bool> immediates_;
   std::vector<bool> parameters_;
 
 public:
-  explicit opcode(std::string_view name, unsigned opcount, std::vector<bool> immediates, std::vector<bool> parameters)
-      : name_(name), operand_count_(opcount), immediates_(std::move(immediates)), parameters_(std::move(parameters)) {}
+  explicit opcode(std::string_view name, unsigned opcount, std::vector<bool> registers, std::vector<bool> immediates,
+                  std::vector<bool> parameters)
+      : name_(name), operand_count_(opcount), registers_(std::move(registers)), immediates_(std::move(immediates)),
+        parameters_(std::move(parameters)) {}
   virtual ~opcode() = default;
 
   std::string_view name() const { return name_; }
   unsigned operand_count() const { return operand_count_; }
 
+  bool can_be_register(unsigned op) const {
+    assert(op < operand_count());
+    return registers_[op];
+  }
   bool can_be_immediate(unsigned op) const {
     assert(op < operand_count());
     return immediates_[op];
@@ -183,8 +190,8 @@ public:
     return parameters_[op];
   }
 
-  virtual bool evaluate(evaluation_context& ctx, std::vector<operand>& operands) = 0;
-  virtual void emit_smt(smt_context& ctx, std::vector<operand>& operands) = 0;
+  virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) = 0;
+  virtual void emit_smt(smt_context& ctx, unsigned lane, std::vector<operand>& operands) = 0;
 
   virtual void update_defined_registers(std::vector<operand> const& operands,
                                         std::vector<bool>& defined_registers) const = 0;

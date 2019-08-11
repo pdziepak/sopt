@@ -32,20 +32,25 @@ std::ostream& operator<<(std::ostream& os, value const& v) {
 }
 
 evaluation_context::evaluation_context(uarch::uarch const& ua, std::map<uint64_t, value> const& params)
-    : ua_(ua), parameters_(params), registers_(ua.gp_registers()), defined_registers_(ua.gp_registers()) {
+    : ua_(ua), parameters_(params), registers_(ua.lanes()), defined_registers_(ua.gp_registers()) {
+  for (auto& rs : registers_) { rs.resize(ua.gp_registers()); }
 }
 
-value evaluation_context::get_register(unsigned r) const {
+value evaluation_context::get_register(unsigned r, unsigned lane) const {
   if (ua_.zero_gp_register() == r) { return value(0); }
-  assert(r < registers_.size());
+  assert(r < ua_.gp_registers());
   assert(defined_registers_[r]);
-  return registers_[r];
+  return registers_[lane % ua_.lanes()][r];
 }
-void evaluation_context::set_register(unsigned r, value v) {
+value evaluation_context::get_register(unsigned r, value lane) const {
+  if (lane.is_undefined()) { return {}; }
+  return get_register(r, lane.as_i32());
+}
+void evaluation_context::set_register(unsigned r, value v, unsigned lane) {
   if (ua_.zero_gp_register() == r) { return; }
-  assert(r < registers_.size());
+  assert(r < ua_.gp_registers());
   v.trim();
-  registers_[r] = v;
+  registers_[lane][r] = v;
   defined_registers_[r] = true;
 }
 bool evaluation_context::is_register_defined(unsigned r) const {
@@ -76,13 +81,19 @@ std::tuple<value, value> evaluation_context::split_u64(value v) {
 
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
                                            std::map<uint64_t, value> const& params,
-                                           std::vector<std::pair<unsigned, value>> const& in,
+                                           std::vector<std::pair<unsigned, std::vector<value>>> const& in,
                                            std::vector<unsigned> const& out) {
   auto ctx = evaluation_context(ua, params);
-  for (auto [reg, val] : in) { ctx.set_register(reg, val); }
+  for (auto [reg, val] : in) {
+    assert(val.size() == ua.lanes());
+    for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, val[lane], lane); }
+  }
   for (auto& inst : bb.instructions_) {
-    if (!inst.opcode_->evaluate(ctx, inst.operands_)) { return {}; }
+    for (auto lane = 0u; lane < ua.lanes(); ++lane) {
+      if (!inst.opcode_->evaluate(ctx, lane, inst.operands_)) { return {}; }
+    }
   }
   if (ranges::any_of(out, [&](unsigned reg) { return !ctx.is_register_defined(reg); })) { return {}; }
-  return out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg); }) | ranges::to<std::vector>();
+  return out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0); }) |
+         ranges::to<std::vector>();
 }

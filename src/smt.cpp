@@ -21,21 +21,27 @@
 #include "instruction.hpp"
 #include "uarch/uarch.hpp"
 
-smt_context::smt_context(uarch::uarch const& ua, z3::context& z3ctx,
-                         std::map<uint64_t, z3::expr> const& params)
-    : ua_(ua), z3_(z3ctx), parameters_(params), registers_(ua.gp_registers(), z3_.int_val(0)),
-      extra_restrictions_(z3_.bool_val(true)) {
+smt_context::smt_context(uarch::uarch const& ua, z3::context& z3ctx, std::map<uint64_t, z3::expr> const& params)
+    : ua_(ua), z3_(z3ctx), parameters_(params), registers_(ua.lanes()), extra_restrictions_(z3_.bool_val(true)) {
+  for (auto& rs : registers_) { rs.resize(ua.gp_registers(), z3_.bv_val(0, 32)); }
 }
 
-z3::expr smt_context::get_register(unsigned r) const {
+z3::expr smt_context::get_register(unsigned r, unsigned lane) const {
   if (ua_.zero_gp_register() == r) { return get_constant(0); }
-  assert(r < registers_.size());
-  return registers_[r];
+  assert(r < ua_.gp_registers());
+  return registers_[lane % ua_.lanes()][r];
 }
-void smt_context::set_register(unsigned r, z3::expr v) {
+z3::expr smt_context::get_register(unsigned r, z3::expr lane) {
+  auto current = get_constant(0); // TODO: poison?
+  for (auto l = 0u; l < ua_.lanes(); ++l) {
+    current = z3::ite(z3::urem(lane, ua_.lanes()) == get_constant(l), registers_[l][r], std::move(current)).simplify();
+  }
+  return current.simplify();
+}
+void smt_context::set_register(unsigned r, z3::expr v, unsigned lane) {
   if (ua_.zero_gp_register() == r) { return; }
-  assert(r < registers_.size());
-  registers_[r] = v;
+  assert(r < ua_.gp_registers());
+  registers_[lane][r] = v;
 }
 
 z3::expr smt_context::get_parameter(uint64_t p) const {
@@ -79,14 +85,18 @@ std::tuple<z3::expr, z3::expr> smt_context::split_u64(z3::expr v) {
 
 std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
                                                      std::map<uint64_t, z3::expr> const& params,
-                                                     std::vector<std::pair<unsigned, z3::expr>> const& in,
+                                                     std::vector<std::pair<unsigned, std::vector<z3::expr>>> const& in,
                                                      std::vector<unsigned> const& out) {
   // FIXME: const correctness
 
   auto ctx = smt_context(ua, z3ctx, params);
-  for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
-  for (auto& inst : bb.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
-  return {out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
+  for (auto [reg, expr] : in) {
+    for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, expr[lane], lane); }
+  }
+  for (auto& inst : bb.instructions_) {
+    for (auto lane = 0u; lane < ua.lanes(); ++lane) { inst.opcode_->emit_smt(ctx, lane, inst.operands_); }
+  }
+  return {out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0).simplify(); }) |
               ranges::to<std::vector>(),
           ctx.extra_restrictions()};
 }

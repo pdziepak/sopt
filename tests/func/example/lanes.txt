@@ -13,8 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-sopt_add_func_test(example constant)
-sopt_add_func_test(example lanes)
-sopt_add_func_test(example parameter)
-sopt_add_func_test(example redundant)
-sopt_add_func_test(example wide)
+# Merge shuffles
+< r0
+shuf.down r0, r0, 1
+shuf.down r0, r0, 1
+shuf.down r0, r0, 1
+> r0
+shuf.down r0, r0, 3
+
+# Reorder operations
+< r0 r1
+shuf.down r0, r0, 1
+shuf.down r1, r1, 1
+add r0, r0, r1
+> r0
+add r0, r0, r1
+shuf.down r0, r0, 1

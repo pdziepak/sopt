@@ -33,7 +33,8 @@
 #include "smt.hpp"
 #include "stats.hpp"
 
-using test = std::tuple<std::map<uint64_t, value>, std::vector<std::pair<unsigned, value>>, std::vector<value>>;
+using test =
+    std::tuple<std::map<uint64_t, value>, std::vector<std::pair<unsigned, std::vector<value>>>, std::vector<value>>;
 
 bool has_unknown_immediates(basic_block const& bb) {
   for (auto& inst : bb.instructions_) {
@@ -46,7 +47,7 @@ bool has_unknown_immediates(basic_block const& bb) {
 
 void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solver& z3slv, interface const& ifce,
                            std::vector<test>& tests, basic_block& candidate, std::map<uint64_t, z3::expr> const& params,
-                           std::vector<std::pair<unsigned, z3::expr>> const& in, basic_block& target,
+                           std::vector<std::pair<unsigned, std::vector<z3::expr>>> const& in, basic_block& target,
                            std::vector<z3::expr> const& target_smt, stats& st) {
   if (!has_unknown_immediates(candidate)) { return; }
 
@@ -57,16 +58,22 @@ void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solve
 
   // FIXME: emit_smt
   auto ctx = smt_context(ua, z3ctx, params);
-  for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
-  for (auto& inst : candidate.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
+  for (auto [reg, expr] : in) {
+    for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, expr[lane], lane); }
+  }
+  for (auto& inst : candidate.instructions_) {
+    for (auto lane = 0u; lane < ua.lanes(); ++lane) { inst.opcode_->emit_smt(ctx, lane, inst.operands_); }
+  }
   auto original_candidate_smt =
-      ifce.output_registers | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
+      ifce.output_registers |
+      ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0).simplify(); }) |
       ranges::to<std::vector>();
   auto original_candidate_extra_smt = ctx.extra_restrictions();
 
   auto original_candidate = candidate;
 
-  auto vars = make_vector(z3ctx, ranges::view::concat(params | ranges::view::values, in | ranges::view::values));
+  auto vars = make_vector(
+      z3ctx, ranges::view::concat(params | ranges::view::values, in | ranges::view::values | ranges::view::join));
 
   do {
     candidate = original_candidate;
@@ -76,9 +83,9 @@ void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solve
     z3slv.reset();
 
     for (auto& [paramv, inv, outv] : tests) {
-      auto vals =
-          make_vector(z3ctx, ranges::view::concat(paramv | ranges::view::values, inv | ranges::view::values) |
-                                 ranges::view::transform([&](value const& v) { return z3ctx.bv_val(v.as_i32(), 32); }));
+      auto vals = make_vector(
+          z3ctx, ranges::view::concat(paramv | ranges::view::values, inv | ranges::view::values | ranges::view::join) |
+                     ranges::view::transform([&](value const& v) { return z3ctx.bv_val(v.as_i32(), 32); }));
       auto cnd = (make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
                                       ranges::view::transform([&](std::tuple<z3::expr, value> v) {
                                         return (std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32));
@@ -94,10 +101,14 @@ void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solve
     ctx.resolve_unknown_immediates(z3slv.get_model());
 
     auto ctx = smt_context(ua, z3ctx, params);
-    for (auto [reg, expr] : in) { ctx.set_register(reg, expr); }
-    for (auto& inst : candidate.instructions_) { inst.opcode_->emit_smt(ctx, inst.operands_); }
+    for (auto [reg, expr] : in) {
+      for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, expr[lane], lane); }
+    }
+    for (auto& inst : candidate.instructions_) {
+      for (auto lane = 0u; lane < ua.lanes(); ++lane) { inst.opcode_->emit_smt(ctx, lane, inst.operands_); }
+    }
     candidate_smt = ifce.output_registers |
-                    ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg).simplify(); }) |
+                    ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0).simplify(); }) |
                     ranges::to<std::vector>();
     candidate_extra_smt = ctx.extra_restrictions();
 
@@ -117,13 +128,18 @@ void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solve
                       return std::pair(std::get<0>(in), value(v));
                     }) |
                     ranges::to<std::map>();
-      auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
-                   auto e = z3slv.get_model().eval(std::get<1>(in));
-                   uint64_t v;
-                   if (!e.is_numeral_u64(v)) { v = 0; }
-                   return std::pair(std::get<0>(in), value(v));
-                 }) |
-                 ranges::to<std::vector>();
+      auto inv =
+          in | ranges::view::transform([&](std::pair<unsigned, std::vector<z3::expr>> in) {
+            return std::pair(std::get<0>(in), std::get<1>(in) | ranges::view::transform([&](z3::expr const& var) {
+                                                auto e = z3slv.get_model().eval(var);
+                                                uint64_t v;
+                                                if (!e.is_numeral_u64(v)) { v = 0; }
+                                                return value(v);
+                                              }) | ranges::to<std::vector>()
+
+            );
+          }) |
+          ranges::to<std::vector>();
       auto outv = evaluate(ua, target, paramv, inv, ifce.output_registers).value();
       spdlog::trace("adding test case (constant synthesis): ({}, {}, {})", paramv, inv, outv);
       tests.emplace_back(paramv, inv, outv);
@@ -181,7 +197,9 @@ bool equivalent(uarch::uarch const& ua, interface const& ifce, basic_block const
                }) |
                ranges::to<std::map>();
   auto in = ifce.input_registers | ranges::view::transform([&](unsigned reg) {
-              return std::pair(reg, ctx.bv_const(fmt::format("r{}", reg).c_str(), 32));
+              return std::pair(reg, ranges::view::iota(0u, ua.lanes()) | ranges::view::transform([&](unsigned lane) {
+                                      return ctx.bv_const(fmt::format("r{}l{}", reg, lane).c_str(), 32);
+                                    }) | ranges::to<std::vector>());
             }) |
             ranges::to<std::vector>();
   auto [expr_a, extra_a] = emit_smt(ua, ctx, a1, param, in, ifce.output_registers);
@@ -190,7 +208,8 @@ bool equivalent(uarch::uarch const& ua, interface const& ifce, basic_block const
 
   z3::solver slv(ctx);
   auto in_expr = z3::expr_vector(ctx);
-  for (auto&& expr : ranges::view::concat(param | ranges::view::values, in | ranges::view::values)) {
+  for (auto&& expr :
+       ranges::view::concat(param | ranges::view::values, in | ranges::view::values | ranges::view::join)) {
     in_expr.push_back(expr);
   }
   for (auto&& [a, b] : ranges::view::zip(expr_a, expr_b)) { slv.add(z3::forall(in_expr, a == b)); }
@@ -206,20 +225,24 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   static constexpr std::array<value, 5> initial_tests = {value(uint32_t(-2)), value(uint32_t(-1)), value(0), value(1),
                                                          value(2)};
   spdlog::debug("preparing {} tests...", initial_tests.size());
-  auto tests = initial_tests | ranges::view::transform([&](value v) {
-                 auto params = ifce.parameters | ranges::view::transform([&](uint64_t p) { return std::pair(p, v); }) |
-                               ranges::to<std::map>();
-                 auto in = ifce.input_registers | ranges::view::transform([&](unsigned r) { return std::pair(r, v); }) |
-                           ranges::to<std::vector>();
-                 auto out = evaluate(ua, target, params, in, ifce.output_registers).value();
-                 return std::tuple(params, in, out);
-               }) |
-               ranges::to<std::vector>();
+  auto tests =
+      initial_tests | ranges::view::transform([&](value v) {
+        auto params = ifce.parameters | ranges::view::transform([&](uint64_t p) { return std::pair(p, v); }) |
+                      ranges::to<std::map>();
+        auto in = ifce.input_registers |
+                  ranges::view::transform([&](unsigned r) { return std::pair(r, std::vector<value>(ua.lanes(), v)); }) |
+                  ranges::to<std::vector>();
+        auto out = evaluate(ua, target, params, in, ifce.output_registers).value();
+        return std::tuple(params, in, out);
+      }) |
+      ranges::to<std::vector>();
   spdlog::trace("prepared tests: {}", fmt::join(tests, ", "));
 
   z3::context z3ctx;
   auto in = ifce.input_registers | ranges::view::transform([&](unsigned reg) {
-              return std::pair(reg, z3ctx.bv_const(fmt::format("r{}", reg).c_str(), 32));
+              return std::pair(reg, ranges::view::iota(0u, ua.lanes()) | ranges::view::transform([&](unsigned lane) {
+                                      return z3ctx.bv_const(fmt::format("r{}l{}", reg, lane).c_str(), 32);
+                                    }) | ranges::to<std::vector>());
             }) |
             ranges::to<std::vector>();
   auto param = ifce.parameters | ranges::view::transform([&](uint64_t p) {
@@ -298,13 +321,16 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
                         return std::pair(std::get<0>(in), value(v));
                       }) |
                       ranges::to<std::map>();
-        auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
-                     auto e = z3slv.get_model().eval(std::get<1>(in));
-                     uint64_t v;
-                     if (!e.is_numeral_u64(v)) { v = 0; }
-                     return std::pair(std::get<0>(in), value(v));
-                   }) |
-                   ranges::to<std::vector>();
+        auto inv =
+            in | ranges::view::transform([&](std::pair<unsigned, std::vector<z3::expr>> in) {
+              return std::pair(std::get<0>(in), std::get<1>(in) | ranges::view::transform([&](z3::expr const& ex) {
+                                                  auto e = z3slv.get_model().eval(ex);
+                                                  uint64_t v;
+                                                  if (!e.is_numeral_u64(v)) { v = 0; }
+                                                  return value(v);
+                                                }) | ranges::to<std::vector>());
+            }) |
+            ranges::to<std::vector>();
         auto outv = evaluate(ua, best, paramv, inv, ifce.output_registers).value();
         spdlog::trace("adding test case: ({}, {}, {})", paramv, inv, outv);
         tests.emplace_back(paramv, inv, outv);

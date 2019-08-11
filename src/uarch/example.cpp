@@ -21,6 +21,7 @@ namespace uarch {
 std::unique_ptr<uarch> make_example() {
   using namespace operand_descriptors;
   return uarch_builder{}                                                                                            //
+      .lanes(4)                                                                                                     //
       .gp_registers(16)                                                                                             //
       .zero_gp_register(15)                                                                                         //
       ("add", operands{dst_reg, reg, reg | imm | param}, [](auto dst, auto src1, auto src2) { dst = src1 + src2; }) //
@@ -30,6 +31,7 @@ std::unique_ptr<uarch> make_example() {
       ("mov", operands{dst_reg, reg | imm | param}, [](auto dst, auto src) { dst = src; })                          //
       ("ld.param", operands{dst_reg, param_addr(reg)}, [](auto dst, auto src) { dst = params(src); })               //
       ("ld.param.64", operands{dst_reg2, param2_addr(reg)}, [](auto dst, auto src) { dst.set64(params64(src)); })   //
+      ("shuf.down", operands{dst_reg, reg, imm}, [](auto dst, auto src1, auto src2) { dst = src1.lane(src2); })     //
       .build();
 }
 

@@ -80,21 +80,23 @@ private:
   operand generate_operand(instruction const& inst, unsigned oper_idx) {
     auto defined_register = get_defined_registers_at(inst);
     if (oper_idx == 0) { // FIXME: don't assume first operand is the register destination
-      for (auto i : ifce_.output_registers) {
-        defined_register[i] = true;
-      }
+      for (auto i : ifce_.output_registers) { defined_register[i] = true; }
       return random_destination_register(defined_register);
     }
+    bool allow_register = inst.opcode_->can_be_register(oper_idx);
     bool allow_immediate = inst.opcode_->can_be_immediate(oper_idx);
     bool allow_parameter = inst.opcode_->can_be_parameter(oper_idx) && ifce_.parameters.size();
-    if (!allow_immediate || std::uniform_int_distribution<unsigned>{0, 100}(prng_)) {
+    if (!allow_immediate || ((allow_register || allow_parameter) && std::uniform_int_distribution<unsigned>{0, 100}(prng_))) {
       if (!allow_parameter || std::uniform_int_distribution<unsigned>{0, 1}(prng_)) {
+        assert(allow_register);
         return random_source_register(defined_register);
       } else {
+        assert(allow_parameter);
         return operand::make_parameter(
             ifce_.parameters[std::uniform_int_distribution<size_t>{0, ifce_.parameters.size() - 1}(prng_)]);
       }
     } else {
+      assert(allow_immediate);
       return operand::make_unknown_immediate();
     }
   }

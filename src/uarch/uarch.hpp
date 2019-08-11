@@ -29,6 +29,8 @@ class uarch {
   unsigned gp_registers_ = 0;
   std::optional<unsigned> zero_gp_register_;
 
+  unsigned lanes_ = 1;
+
   std::vector<std::unique_ptr<opcode>> all_opcodes_;
   std::unordered_map<std::string_view, opcode*> opcode_by_name_;
 
@@ -37,6 +39,8 @@ class uarch {
 public:
   unsigned gp_registers() const { return gp_registers_; }
   std::optional<unsigned> zero_gp_register() const { return zero_gp_register_; }
+
+  unsigned lanes() const { return lanes_; }
 
   std::vector<std::unique_ptr<opcode>> const& all_opcodes() const { return all_opcodes_; }
 
@@ -84,9 +88,9 @@ template<size_t N, typename Operand, typename... Operands>
 struct get_operand<N, Operand, Operands...> : get_operand<N - 1, Operands...> {};
 template<typename Operand, typename... Operands> struct get_operand<0, Operand, Operands...> { using type = Operand; };
 
-template<size_t N, typename... Operands>
-using get_operand_t = typename get_operand<N, Operands...>::type;
+template<size_t N, typename... Operands> using get_operand_t = typename get_operand<N, Operands...>::type;
 
+template<typename Operand> constexpr bool allows_registers = std::is_base_of_v<operand_descriptors::reg_t, Operand>;
 template<typename Operand> constexpr bool allows_immediates = std::is_base_of_v<operand_descriptors::imm_t, Operand>;
 template<typename Operand> constexpr bool allows_parameters = std::is_base_of_v<operand_descriptors::param_t, Operand>;
 template<typename Operand>
@@ -96,30 +100,34 @@ constexpr bool is_double_parameter_address = std::is_base_of_v<operand_descripto
 
 template<typename Context> class dst_wrapper {
   Context* ctx_;
+  unsigned lane_;
   operand* op_;
 
 public:
-  dst_wrapper(Context& ctx, operand& op) : ctx_(&ctx), op_(&op) {}
+  dst_wrapper(Context& ctx, unsigned lane, operand& op) : ctx_(&ctx), lane_(lane), op_(&op) {}
   template<typename Value> void operator=(Value value) {
-    op_->set(*ctx_, static_cast<typename Context::value_type>(value));
+    op_->set(*ctx_, static_cast<typename Context::value_type>(value), lane_);
   }
   template<typename Value> void set64(Value value) {
     auto [lo, hi] = ctx_->split_u64(static_cast<typename Context::value_type>(value));
-    op_->set(*ctx_, lo);
-    op_->set_hi(*ctx_, hi);
+    op_->set(*ctx_, lo, lane_);
+    op_->set_hi(*ctx_, hi, lane_);
   }
 };
 
 template<typename Context> class src_wrapper {
   Context* ctx_;
+  unsigned lane_;
   operand* op_;
 
 public:
-  src_wrapper(Context& ctx, operand& op) : ctx_(&ctx), op_(&op) {}
-  typename Context::value_type value() const { return op_->get(*ctx_); }
+  src_wrapper(Context& ctx, unsigned lane, operand& op) : ctx_(&ctx), lane_(lane), op_(&op) {}
+  typename Context::value_type value() const { return op_->get(*ctx_, lane_); }
   operator typename Context::value_type() const { return value(); }
 
-  auto value64() { return ctx_->make_u64(op_->get(*ctx_), op_->get_hi(*ctx_)); }
+  auto lane(src_wrapper const& lane) const { return op_->get(*ctx_, lane.value() + int(lane_)); }
+
+  auto value64() { return ctx_->make_u64(op_->get(*ctx_, lane_), op_->get_hi(*ctx_, lane_)); }
 
   friend auto operator+(src_wrapper const& a, src_wrapper const& b) { return a.value() + b.value(); }
   friend auto operator*(src_wrapper const& a, src_wrapper const& b) { return a.value() * b.value(); }
@@ -131,8 +139,8 @@ public:
 };
 
 template<typename... Operands, size_t... Idx, typename Context>
-bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> const& ops) {
-  auto verify_operand = [&ctx](auto desc_ptr, auto& op) {
+bool do_verify(std::index_sequence<Idx...>, Context& ctx, unsigned lane, std::vector<operand> const& ops) {
+  auto verify_operand = [&ctx, lane](auto desc_ptr, auto& op) {
     using namespace operand_descriptors;
     using desc = std::remove_pointer_t<decltype(desc_ptr)>;
     if constexpr (!std::is_same_v<desc, dst_reg_t> && !std::is_same_v<desc, dst_reg2_t>) {
@@ -147,10 +155,13 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
     if constexpr (!allows_parameters<desc>) {
       if (op.is_parameter()) { return false; }
     }
+    if constexpr (!allows_registers<desc>) {
+      if (op.is_register()) { return false; }
+    }
     if constexpr (is_double_parameter_address<desc>) {
-      if (!ctx.is_valid_parameter64(op.get(ctx))) { return false; }
+      if (!ctx.is_valid_parameter64(op.get(ctx, lane))) { return false; }
     } else if constexpr (is_parameter_address<desc>) {
-      if (!ctx.is_valid_parameter(op.get(ctx))) { return false; }
+      if (!ctx.is_valid_parameter(op.get(ctx, lane))) { return false; }
     }
     return true;
   };
@@ -158,8 +169,9 @@ bool do_verify(std::index_sequence<Idx...>, Context& ctx, std::vector<operand> c
 }
 
 template<size_t... Idx, typename Context, typename Function>
-void do_apply(std::index_sequence<Idx...>, Function&& fn, Context& ctx, std::vector<operand>& ops) {
-  fn(dst_wrapper<std::decay_t<Context>>(ctx, ops[0]), src_wrapper<std::decay_t<Context>>(ctx, ops[Idx + 1])...);
+void do_apply(std::index_sequence<Idx...>, Function&& fn, Context& ctx, unsigned lane, std::vector<operand>& ops) {
+  fn(dst_wrapper<std::decay_t<Context>>(ctx, lane, ops[0]),
+     src_wrapper<std::decay_t<Context>>(ctx, lane, ops[Idx + 1])...);
 };
 
 } // namespace detail
@@ -171,18 +183,19 @@ template<typename... Operands> struct operands {
 
   operands(Operands...) {}
 
-  template<typename Context> static bool verify(Context const& ctx, std::vector<operand> const& ops) {
+  template<typename Context> static bool verify(Context const& ctx, unsigned lane, std::vector<operand> const& ops) {
     using namespace detail;
     if (ops.size() != count || !ops[0].is_register()) { return false; }
-    return do_verify<Operands...>(std::make_index_sequence<count>(), ctx, ops);
+    return do_verify<Operands...>(std::make_index_sequence<count>(), ctx, lane, ops);
   }
 
   template<typename Function, typename Context>
-  static void apply(Function&& fn, Context&& ctx, std::vector<operand>& ops) {
+  static void apply(Function&& fn, Context&& ctx, unsigned lane, std::vector<operand>& ops) {
     using namespace detail;
-    do_apply(std::make_index_sequence<count - 1>(), fn, ctx, ops);
+    do_apply(std::make_index_sequence<count - 1>(), fn, ctx, lane, ops);
   }
 
+  static std::vector<bool> make_register_mask() { return std::vector<bool>{detail::allows_registers<Operands>...}; }
   static std::vector<bool> make_immediate_mask() { return std::vector<bool>{detail::allows_immediates<Operands>...}; }
   static std::vector<bool> make_parameter_mask() { return std::vector<bool>{detail::allows_parameters<Operands>...}; }
 };
@@ -210,6 +223,11 @@ public:
     return std::move(*this);
   }
 
+  uarch_builder&& lanes(unsigned l) && {
+    uarch_->lanes_ = l;
+    return std::move(*this);
+  }
+
   template<typename... Operands, typename Function>
   uarch_builder&& operator()(std::string_view name, operands<Operands...>, Function&& fn) && {
     using ops = operands<Operands...>;
@@ -217,16 +235,17 @@ public:
     class concrete_opcode final : public opcode, Function {
     public:
       explicit concrete_opcode(std::string_view name, Function fn)
-          : opcode(name, ops::count, ops::make_immediate_mask(), ops::make_parameter_mask()), Function(std::move(fn)) {}
+          : opcode(name, ops::count, ops::make_register_mask(), ops::make_immediate_mask(), ops::make_parameter_mask()),
+            Function(std::move(fn)) {}
 
-      virtual bool evaluate(evaluation_context& ctx, std::vector<operand>& operands) override {
-        if (!ops::verify(ctx, operands)) { return false; }
-        ops::apply(*static_cast<Function*>(this), ctx, operands);
+      virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) override {
+        if (!ops::verify(ctx, lane, operands)) { return false; }
+        ops::apply(*static_cast<Function*>(this), ctx, lane, operands);
         return true;
       }
 
-      virtual void emit_smt(smt_context& ctx, std::vector<operand>& operands) override {
-        ops::apply(*static_cast<Function*>(this), ctx, operands);
+      virtual void emit_smt(smt_context& ctx, unsigned lane, std::vector<operand>& operands) override {
+        ops::apply(*static_cast<Function*>(this), ctx, lane, operands);
       }
 
       virtual void update_defined_registers(std::vector<operand> const& operands,
@@ -237,7 +256,8 @@ public:
         defined_registers[operands[0].get_register_id()] = true;
 
         // FIXME: use a trait for this
-        if constexpr (std::is_same_v<detail::get_operand_t<0, std::decay_t<Operands>...>, operand_descriptors::dst_reg2_t>) {
+        if constexpr (std::is_same_v<detail::get_operand_t<0, std::decay_t<Operands>...>,
+                                     operand_descriptors::dst_reg2_t>) {
           assert(operands[0].get_register_id() + 1 < defined_registers.size());
 
           defined_registers[operands[0].get_register_id() + 1] = true;

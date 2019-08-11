@@ -18,8 +18,8 @@
 
 #include <cassert>
 #include <cstdint>
-#include <unordered_map>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace uarch {
@@ -38,9 +38,7 @@ public:
   constexpr bool is_undefined() const { return !defined_; }
 
   void trim() {
-    if (!is_undefined()) {
-      integer_ = uint32_t(integer_);
-    }
+    if (!is_undefined()) { integer_ = uint32_t(integer_); }
   }
   constexpr uint32_t as_i32() const {
     assert(!is_undefined());
@@ -68,9 +66,7 @@ public:
   friend bool operator==(value const& a, value const& b) {
     return a.defined_ == b.defined_ && a.integer_ == b.integer_;
   }
-  friend bool operator!=(value const& a, value const& b) {
-    return !(a == b);
-  }
+  friend bool operator!=(value const& a, value const& b) { return !(a == b); }
 
   friend std::ostream& operator<<(std::ostream&, value const&);
 };
@@ -79,7 +75,7 @@ class evaluation_context {
   uarch::uarch const& ua_;
   std::map<uint64_t, value> const& parameters_;
 
-  std::vector<value> registers_;
+  std::vector<std::vector<value>> registers_;
   std::vector<bool> defined_registers_;
 
 public:
@@ -87,8 +83,9 @@ public:
 
   explicit evaluation_context(uarch::uarch const& ua, std::map<uint64_t, value> const& params);
 
-  value get_register(unsigned r) const;
-  void set_register(unsigned r, value v);
+  value get_register(unsigned r, unsigned lane) const;
+  value get_register(unsigned r, value lane) const;
+  void set_register(unsigned r, value v, unsigned lane);
   bool is_register_defined(unsigned r) const;
 
   value get_parameter(value p) const;
@@ -101,5 +98,5 @@ public:
 
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
                                            std::map<uint64_t, value> const& params,
-                                           std::vector<std::pair<unsigned, value>> const& in,
+                                           std::vector<std::pair<unsigned, std::vector<value>>> const& in,
                                            std::vector<unsigned> const& out);
