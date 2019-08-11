@@ -22,7 +22,7 @@
 #include "uarch/uarch.hpp"
 
 smt_context::smt_context(uarch::uarch const& ua, z3::context& z3ctx,
-                         std::unordered_map<uint64_t, z3::expr> const& params)
+                         std::map<uint64_t, z3::expr> const& params)
     : ua_(ua), z3_(z3ctx), parameters_(params), registers_(ua.gp_registers(), z3_.int_val(0)),
       extra_restrictions_(z3_.bool_val(true)) {
 }
@@ -78,7 +78,7 @@ std::tuple<z3::expr, z3::expr> smt_context::split_u64(z3::expr v) {
 }
 
 std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
-                                                     std::unordered_map<uint64_t, z3::expr> const& params,
+                                                     std::map<uint64_t, z3::expr> const& params,
                                                      std::vector<std::pair<unsigned, z3::expr>> const& in,
                                                      std::vector<unsigned> const& out) {
   // FIXME: const correctness

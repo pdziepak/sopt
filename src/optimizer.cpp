@@ -33,8 +33,7 @@
 #include "smt.hpp"
 #include "stats.hpp"
 
-using test =
-    std::tuple<std::unordered_map<uint64_t, value>, std::vector<std::pair<unsigned, value>>, std::vector<value>>;
+using test = std::tuple<std::map<uint64_t, value>, std::vector<std::pair<unsigned, value>>, std::vector<value>>;
 
 bool has_unknown_immediates(basic_block const& bb) {
   for (auto& inst : bb.instructions_) {
@@ -46,8 +45,7 @@ bool has_unknown_immediates(basic_block const& bb) {
 }
 
 void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solver& z3slv, interface const& ifce,
-                           std::vector<test>& tests, basic_block& candidate,
-                           std::unordered_map<uint64_t, z3::expr> const& params,
+                           std::vector<test>& tests, basic_block& candidate, std::map<uint64_t, z3::expr> const& params,
                            std::vector<std::pair<unsigned, z3::expr>> const& in, basic_block& target,
                            std::vector<z3::expr> const& target_smt, stats& st) {
   if (!has_unknown_immediates(candidate)) { return; }
@@ -118,7 +116,7 @@ void synthesize_immediates(uarch::uarch const& ua, z3::context& z3ctx, z3::solve
                       if (!e.is_numeral_u64(v)) { v = 0; }
                       return std::pair(std::get<0>(in), value(v));
                     }) |
-                    ranges::to<std::unordered_map>();
+                    ranges::to<std::map>();
       auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
                    auto e = z3slv.get_model().eval(std::get<1>(in));
                    uint64_t v;
@@ -159,9 +157,7 @@ double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> co
   for (auto [param, in, out] : tests) {
     auto actual_out = evaluate(ua, bb, param, in, ifce.output_registers);
     for (auto idx = 0u; idx < out.size(); ++idx) {
-      if (!actual_out || (*actual_out)[idx] != out[idx]) {
-        cost += 1;
-      }
+      if (!actual_out || (*actual_out)[idx] != out[idx]) { cost += 1; }
     }
   }
 
@@ -183,7 +179,7 @@ bool equivalent(uarch::uarch const& ua, interface const& ifce, basic_block const
   auto param = ifce.parameters | ranges::view::transform([&](uint64_t p) {
                  return std::pair(p, ctx.bv_const(fmt::format("p{}", p).c_str(), 32));
                }) |
-               ranges::to<std::unordered_map>();
+               ranges::to<std::map>();
   auto in = ifce.input_registers | ranges::view::transform([&](unsigned reg) {
               return std::pair(reg, ctx.bv_const(fmt::format("r{}", reg).c_str(), 32));
             }) |
@@ -207,11 +203,12 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   spdlog::info("optimizing basic block, inputs: {}, outputs: {}\n{}", ifce.input_registers, ifce.output_registers,
                target);
 
-  static constexpr std::array<value, 5> initial_tests = {value(uint32_t(-2)), value(uint32_t(-1)), value(0), value(1), value(2)};
+  static constexpr std::array<value, 5> initial_tests = {value(uint32_t(-2)), value(uint32_t(-1)), value(0), value(1),
+                                                         value(2)};
   spdlog::debug("preparing {} tests...", initial_tests.size());
   auto tests = initial_tests | ranges::view::transform([&](value v) {
                  auto params = ifce.parameters | ranges::view::transform([&](uint64_t p) { return std::pair(p, v); }) |
-                               ranges::to<std::unordered_map>();
+                               ranges::to<std::map>();
                  auto in = ifce.input_registers | ranges::view::transform([&](unsigned r) { return std::pair(r, v); }) |
                            ranges::to<std::vector>();
                  auto out = evaluate(ua, target, params, in, ifce.output_registers).value();
@@ -228,7 +225,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
   auto param = ifce.parameters | ranges::view::transform([&](uint64_t p) {
                  return std::pair(p, z3ctx.bv_const(fmt::format("p{}", p).c_str(), 32));
                }) |
-               ranges::to<std::unordered_map>();
+               ranges::to<std::map>();
   auto [target_smt, target_extra_smt] = emit_smt(ua, z3ctx, target, param, in, ifce.output_registers);
   for (auto& tsmt : target_smt) { tsmt = tsmt.simplify(); }
   target_extra_smt = target_extra_smt.simplify();
@@ -300,7 +297,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
                         if (!e.is_numeral_u64(v)) { v = 0; }
                         return std::pair(std::get<0>(in), value(v));
                       }) |
-                      ranges::to<std::unordered_map>();
+                      ranges::to<std::map>();
         auto inv = in | ranges::view::transform([&](std::pair<unsigned, z3::expr> in) {
                      auto e = z3slv.get_model().eval(std::get<1>(in));
                      uint64_t v;

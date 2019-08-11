@@ -19,6 +19,7 @@
 #include <cassert>
 #include <cstdint>
 #include <unordered_map>
+#include <map>
 #include <vector>
 
 namespace uarch {
@@ -76,7 +77,7 @@ public:
 
 class evaluation_context {
   uarch::uarch const& ua_;
-  std::unordered_map<uint64_t, value> const& parameters_;
+  std::map<uint64_t, value> const& parameters_;
 
   std::vector<value> registers_;
   std::vector<bool> defined_registers_;
@@ -84,7 +85,7 @@ class evaluation_context {
 public:
   using value_type = value;
 
-  explicit evaluation_context(uarch::uarch const& ua, std::unordered_map<uint64_t, value> const& params);
+  explicit evaluation_context(uarch::uarch const& ua, std::map<uint64_t, value> const& params);
 
   value get_register(unsigned r) const;
   void set_register(unsigned r, value v);
@@ -99,6 +100,6 @@ public:
 };
 
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
-                                           std::unordered_map<uint64_t, value> const& params,
+                                           std::map<uint64_t, value> const& params,
                                            std::vector<std::pair<unsigned, value>> const& in,
                                            std::vector<unsigned> const& out);

@@ -31,7 +31,7 @@ std::ostream& operator<<(std::ostream& os, value const& v) {
   return os;
 }
 
-evaluation_context::evaluation_context(uarch::uarch const& ua, std::unordered_map<uint64_t, value> const& params)
+evaluation_context::evaluation_context(uarch::uarch const& ua, std::map<uint64_t, value> const& params)
     : ua_(ua), parameters_(params), registers_(ua.gp_registers()), defined_registers_(ua.gp_registers()) {
 }
 
@@ -75,7 +75,7 @@ std::tuple<value, value> evaluation_context::split_u64(value v) {
 }
 
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
-                                           std::unordered_map<uint64_t, value> const& params,
+                                           std::map<uint64_t, value> const& params,
                                            std::vector<std::pair<unsigned, value>> const& in,
                                            std::vector<unsigned> const& out) {
   auto ctx = evaluation_context(ua, params);

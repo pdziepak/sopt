@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <unordered_map>
+#include <map>
 #include <vector>
 
 #include <z3++.h>
@@ -45,7 +46,7 @@ class smt_context {
   uarch::uarch const& ua_;
   z3::context& z3_;
 
-  std::unordered_map<uint64_t, z3::expr> parameters_;
+  std::map<uint64_t, z3::expr> parameters_;
 
   std::vector<std::tuple<z3::expr, std::function<void(uint64_t)>>> unknown_immediates_;
   std::vector<z3::expr> registers_;
@@ -56,7 +57,7 @@ public:
   using value_type = z3::expr;
 
   explicit smt_context(uarch::uarch const& ua, z3::context& z3ctx,
-                       std::unordered_map<uint64_t, z3::expr> const& params = {});
+                       std::map<uint64_t, z3::expr> const& params = {});
 
   z3::expr get_register(unsigned r) const;
   void set_register(unsigned r, z3::expr v);
@@ -75,6 +76,6 @@ public:
 };
 
 std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
-                                                     std::unordered_map<uint64_t, z3::expr> const& params,
+                                                     std::map<uint64_t, z3::expr> const& params,
                                                      std::vector<std::pair<unsigned, z3::expr>> const& in,
                                                      std::vector<unsigned> const& out);
