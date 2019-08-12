@@ -44,6 +44,7 @@ add_library(sopt-lib
   src/evaluation.cpp
   src/mutate.cpp
   src/optimizer.cpp
+  src/perf.cpp
   src/smt.cpp
 )
 target_include_directories(sopt-lib PUBLIC

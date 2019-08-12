@@ -166,12 +166,15 @@ class opcode {
   std::vector<bool> registers_;
   std::vector<bool> immediates_;
   std::vector<bool> parameters_;
+  std::vector<bool> wide_;
+
+  unsigned latency_;
 
 public:
   explicit opcode(std::string_view name, unsigned opcount, std::vector<bool> registers, std::vector<bool> immediates,
-                  std::vector<bool> parameters)
+                  std::vector<bool> parameters, std::vector<bool> wide, unsigned lat)
       : name_(name), operand_count_(opcount), registers_(std::move(registers)), immediates_(std::move(immediates)),
-        parameters_(std::move(parameters)) {}
+        parameters_(std::move(parameters)), wide_(std::move(wide)), latency_(lat) {}
   virtual ~opcode() = default;
 
   std::string_view name() const { return name_; }
@@ -189,6 +192,13 @@ public:
     assert(op < operand_count());
     return parameters_[op];
   }
+
+  bool is_wide_operand(unsigned op) const {
+    assert(op < operand_count());
+    return wide_[op];
+  }
+
+  unsigned latency() const { return latency_; }
 
   virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) = 0;
   virtual void emit_smt(smt_context& ctx, unsigned lane, std::vector<operand>& operands) = 0;

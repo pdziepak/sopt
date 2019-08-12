@@ -30,6 +30,7 @@
 #include "evaluation.hpp"
 #include "mutate.hpp"
 #include "optimizer.hpp"
+#include "perf.hpp"
 #include "smt.hpp"
 #include "stats.hpp"
 
@@ -159,12 +160,8 @@ double cost_to_score(double cost) {
   return std::exp(-0.5 * cost);
 }
 
-double cost_performance(basic_block const& bb) {
-  return bb.instructions_.size();
-}
-
-double score_performance(basic_block const& bb) {
-  return cost_to_score(cost_performance(bb));
+double score_performance(uarch::uarch const& ua, interface const& ifce, basic_block const& bb) {
+  return cost_to_score(cost_performance(ua, ifce, bb));
 }
 
 double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb) {
@@ -177,7 +174,7 @@ double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> co
     }
   }
 
-  cost += cost_performance(bb);
+  cost += cost_performance(ua, ifce, bb);
 
   return cost_to_score(cost);
 }
@@ -259,7 +256,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
 
   auto best_score = target_score;
   auto best = target;
-  spdlog::debug("initial score: {}", target_score);
+  spdlog::debug("initial score: {} (perf cost: {})", target_score, cost_performance(ua, ifce, target));
 
   auto prng = std::default_random_engine{std::random_device{}()};
 
@@ -344,7 +341,8 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
 
   auto elapsed_time =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1'000.;
-  spdlog::info("finished with score {} after {} seconds: {}\n{}", best_score, elapsed_time, total_stats, best);
+  spdlog::info("finished with score {} (perf cost: {}) after {} seconds: {}\n{}", best_score,
+               cost_performance(ua, ifce, best), elapsed_time, total_stats, best);
 
   return best;
 }

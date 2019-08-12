@@ -47,6 +47,15 @@ public:
   opcode* get_opcode(std::string_view op) const { return opcode_by_name_.at(op); }
 };
 
+class latency {
+  unsigned latency_;
+
+public:
+  explicit latency(unsigned l) : latency_(l) {}
+
+  explicit operator unsigned() const { return latency_; }
+};
+
 namespace operand_descriptors {
 
 namespace detail {
@@ -93,6 +102,7 @@ template<size_t N, typename... Operands> using get_operand_t = typename get_oper
 template<typename Operand> constexpr bool allows_registers = std::is_base_of_v<operand_descriptors::reg_t, Operand>;
 template<typename Operand> constexpr bool allows_immediates = std::is_base_of_v<operand_descriptors::imm_t, Operand>;
 template<typename Operand> constexpr bool allows_parameters = std::is_base_of_v<operand_descriptors::param_t, Operand>;
+template<typename Operand> constexpr bool is_wide = std::is_base_of_v<operand_descriptors::reg2_t, Operand>;
 template<typename Operand>
 constexpr bool is_parameter_address = std::is_base_of_v<operand_descriptors::detail::param_address_t, Operand>;
 template<typename Operand>
@@ -198,6 +208,8 @@ template<typename... Operands> struct operands {
   static std::vector<bool> make_register_mask() { return std::vector<bool>{detail::allows_registers<Operands>...}; }
   static std::vector<bool> make_immediate_mask() { return std::vector<bool>{detail::allows_immediates<Operands>...}; }
   static std::vector<bool> make_parameter_mask() { return std::vector<bool>{detail::allows_parameters<Operands>...}; }
+
+  static std::vector<bool> make_wide_mask() { return std::vector<bool>{detail::is_wide<Operands>...}; }
 };
 
 class uarch_builder {
@@ -229,13 +241,14 @@ public:
   }
 
   template<typename... Operands, typename Function>
-  uarch_builder&& operator()(std::string_view name, operands<Operands...>, Function&& fn) && {
+  uarch_builder&& operator()(std::string_view name, operands<Operands...>, latency lat, Function&& fn) && {
     using ops = operands<Operands...>;
 
     class concrete_opcode final : public opcode, Function {
     public:
-      explicit concrete_opcode(std::string_view name, Function fn)
-          : opcode(name, ops::count, ops::make_register_mask(), ops::make_immediate_mask(), ops::make_parameter_mask()),
+      explicit concrete_opcode(std::string_view name, ::uarch::latency lat, Function fn)
+          : opcode(name, ops::count, ops::make_register_mask(), ops::make_immediate_mask(), ops::make_parameter_mask(),
+                   ops::make_wide_mask(), unsigned(lat)),
             Function(std::move(fn)) {}
 
       virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) override {
@@ -265,7 +278,7 @@ public:
       }
     };
 
-    add_opcode(std::make_unique<concrete_opcode>(name, std::forward<Function>(fn)));
+    add_opcode(std::make_unique<concrete_opcode>(name, lat, std::forward<Function>(fn)));
     return std::move(*this);
   }
 

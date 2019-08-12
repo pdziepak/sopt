@@ -17,16 +17,7 @@
 #pragma once
 
 #include "instruction.hpp"
+#include "optimizer.hpp"
 #include "uarch/uarch.hpp"
 
-struct interface {
-  std::vector<uint64_t> parameters;
-  std::vector<unsigned> input_registers;
-  std::vector<unsigned> output_registers;
-};
-
-basic_block optimize(uarch::uarch const& ua, interface const&, basic_block, double score);
-
-double score_performance(uarch::uarch const& ua, interface const&, basic_block const& bb);
-
-bool equivalent(uarch::uarch const& ua, interface const&, basic_block const& a, basic_block const& b);
+double cost_performance(uarch::uarch const&, interface const& ifce, basic_block const& bb);

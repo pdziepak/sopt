@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
     ++total;
     spdlog::info("running test case #{}...", total);
 
-    auto expected_score = score_performance(expected_output);
+    auto expected_score = score_performance(*uarch, ifce, expected_output);
     try {
       actual_output = optimize(*uarch, ifce, *input, expected_score);
 
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
       ++failed;
       return;
     }
-    auto actual_score = score_performance(actual_output);
+    auto actual_score = score_performance(*uarch, ifce, actual_output);
     if (expected_score > actual_score) {
       spdlog::error("actual output scores worse ({}) than expected output ({})\nactual:\n{}\nexpected:\n{}",
                     actual_score, expected_score, actual_output, expected_output);
