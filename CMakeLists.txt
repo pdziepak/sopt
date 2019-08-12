@@ -39,6 +39,9 @@ find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
 
 add_library(sopt-lib
+  src/optimizer/path.cpp
+  src/optimizer/target.cpp
+
   src/uarch/example.cpp
 
   src/evaluation.cpp
