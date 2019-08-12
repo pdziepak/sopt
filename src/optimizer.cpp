@@ -113,7 +113,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
 
   z3::solver z3slv(trgt.z3_context());
 
-  auto pth = optimizer::path(prng, z3slv, trgt);
+  auto pths = std::vector<optimizer::path>(16, optimizer::path(prng, z3slv, trgt));
 
   while (trgt.best_score() < min_score) {
     auto now = std::chrono::steady_clock::now();
@@ -122,11 +122,17 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
       total_stats += tick_stats;
       tick_stats = {};
       trace_tick = now + std::chrono::seconds(1);
+
+      ranges::sort(pths, [](optimizer::path const& a, optimizer::path const& b) {
+        return a.current_score() > b.current_score();
+      });
+      pths.erase(pths.begin() + 12, pths.end());
+      pths.resize(16, optimizer::path(prng, z3slv, trgt));
     }
 
     tick_stats.on_new_candidate();
 
-    pth.next_step(tick_stats);
+    for (auto& pth : pths) { pth.next_step(tick_stats); }
   }
 
   total_stats += tick_stats;
