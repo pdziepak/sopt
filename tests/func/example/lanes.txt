@@ -21,6 +21,14 @@ shuf.down r0, r0, 1
 > r0
 shuf.down r0, r0, 3
 
+# Merge shuffles
+< r0
+shuf.down r0, r0, 1
+shuf.down r0, r0, 1
+shuf.down r0, r0, 1
+shuf.down r0, r0, 1
+> r0
+
 # Reorder operations
 < r0 r1
 shuf.down r0, r0, 1

@@ -78,6 +78,8 @@ class evaluation_context {
   std::vector<std::vector<value>> registers_;
   std::vector<bool> defined_registers_;
 
+  std::vector<std::tuple<unsigned, unsigned, value>> pending_register_writes_;
+
 public:
   using value_type = value;
 
@@ -87,6 +89,8 @@ public:
   value get_register(unsigned r, value lane) const;
   void set_register(unsigned r, value v, unsigned lane);
   bool is_register_defined(unsigned r) const;
+
+  void commit_pending_operations();
 
   value get_parameter(value p) const;
   bool is_valid_parameter(value p) const;

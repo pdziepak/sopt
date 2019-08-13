@@ -50,12 +50,21 @@ void evaluation_context::set_register(unsigned r, value v, unsigned lane) {
   if (ua_.zero_gp_register() == r) { return; }
   assert(r < ua_.gp_registers());
   v.trim();
-  registers_[lane][r] = v;
-  defined_registers_[r] = true;
+  pending_register_writes_.emplace_back(lane, r, std::move(v));
 }
 bool evaluation_context::is_register_defined(unsigned r) const {
   if (ua_.zero_gp_register() == r) { return true; }
   return defined_registers_[r];
+}
+
+void evaluation_context::commit_pending_operations() {
+  for (auto& [lane, reg, expr] : pending_register_writes_) {
+    assert(lane < ua_.lanes());
+    assert(reg < ua_.gp_registers());
+    registers_[lane][reg] = std::move(expr);
+    defined_registers_[reg] = true;
+  }
+  pending_register_writes_.clear();
 }
 
 value evaluation_context::get_parameter(value p) const {
@@ -88,10 +97,12 @@ std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& 
     assert(val.size() == ua.lanes());
     for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, val[lane], lane); }
   }
+  ctx.commit_pending_operations();
   for (auto& inst : bb.instructions_) {
     for (auto lane = 0u; lane < ua.lanes(); ++lane) {
       if (!inst.opcode_->evaluate(ctx, lane, inst.operands_)) { return {}; }
     }
+    ctx.commit_pending_operations();
   }
   if (ranges::any_of(out, [&](unsigned reg) { return !ctx.is_register_defined(reg); })) { return {}; }
   return out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0); }) |

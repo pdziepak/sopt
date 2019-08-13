@@ -70,8 +70,10 @@ void path::synthesize_immediates(basic_block& candidate, stats& st) {
   for (auto [reg, expr] : in) {
     for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, expr[lane], lane); }
   }
+  ctx.commit_pending_operations();
   for (auto& inst : candidate.instructions_) {
     for (auto lane = 0u; lane < ua.lanes(); ++lane) { inst.opcode_->emit_smt(ctx, lane, inst.operands_); }
+    ctx.commit_pending_operations();
   }
   auto original_candidate_smt =
       ifce.output_registers |
@@ -113,8 +115,10 @@ void path::synthesize_immediates(basic_block& candidate, stats& st) {
     for (auto [reg, expr] : in) {
       for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, expr[lane], lane); }
     }
+    ctx.commit_pending_operations();
     for (auto& inst : candidate.instructions_) {
       for (auto lane = 0u; lane < ua.lanes(); ++lane) { inst.opcode_->emit_smt(ctx, lane, inst.operands_); }
+      ctx.commit_pending_operations();
     }
     candidate_smt = ifce.output_registers |
                     ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0).simplify(); }) |
@@ -123,8 +127,8 @@ void path::synthesize_immediates(basic_block& candidate, stats& st) {
 
     z3slv_->reset();
     z3slv_->add(make_or(z3ctx, ranges::view::zip(candidate_smt, target_smt) | ranges::view::transform([&](auto&& a_b) {
-                                return std::get<0>(a_b) != std::get<1>(a_b);
-                              })));
+                                 return std::get<0>(a_b) != std::get<1>(a_b);
+                               })));
     st.on_smt_query();
     auto result = z3slv_->check();
     if (result == z3::check_result::unsat) {
@@ -190,9 +194,9 @@ void path::next_step(stats& st) {
 
   z3slv_->reset();
   z3slv_->add(make_or(target_->z3ctx_,
-                     ranges::view::zip(candidate_smt, target_->target_smt_) |
-                         ranges::view::transform([](auto c_t) { return std::get<0>(c_t) != std::get<1>(c_t); })) ||
-             !candidate_extra_smt);
+                      ranges::view::zip(candidate_smt, target_->target_smt_) |
+                          ranges::view::transform([](auto c_t) { return std::get<0>(c_t) != std::get<1>(c_t); })) ||
+              !candidate_extra_smt);
   auto result = z3slv_->check();
   if (result == z3::check_result::unsat) {
     spdlog::debug("found better basic block with score {}:\n{}", candidate_score, candidate);

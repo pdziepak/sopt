@@ -41,7 +41,16 @@ z3::expr smt_context::get_register(unsigned r, z3::expr lane) {
 void smt_context::set_register(unsigned r, z3::expr v, unsigned lane) {
   if (ua_.zero_gp_register() == r) { return; }
   assert(r < ua_.gp_registers());
-  registers_[lane][r] = v;
+  pending_register_writes_.emplace_back(lane, r, std::move(v));
+}
+
+void smt_context::commit_pending_operations() {
+  for (auto& [lane, reg, expr] : pending_register_writes_) {
+    assert(lane < ua_.lanes());
+    assert(reg < ua_.gp_registers());
+    registers_[lane][reg] = std::move(expr);
+  }
+  pending_register_writes_.clear();
 }
 
 z3::expr smt_context::get_parameter(uint64_t p) const {
@@ -60,9 +69,13 @@ z3::expr smt_context::get_constant(uint64_t v) const {
   return z3_.bv_val(v, 32);
 }
 
-z3::expr smt_context::add_unknown_immediate(std::function<void(uint64_t)> fn) {
-  return std::get<0>(
+z3::expr smt_context::add_unknown_immediate(void* id, std::function<void(uint64_t)> fn) {
+  auto it = unique_unknown_immediates_.find(id);
+  if (it != unique_unknown_immediates_.end()) { return it->second; }
+  auto expr = std::get<0>(
       unknown_immediates_.emplace_back(z3_.bv_const(fmt::format("imm{}", unknown_immediates_.size()).c_str(), 32), fn));
+  unique_unknown_immediates_.insert(std::pair(id, expr));
+  return expr;
 }
 void smt_context::resolve_unknown_immediates(z3::model const& mdl) {
   for (auto& [expr, fn] : unknown_immediates_) {
@@ -93,8 +106,10 @@ std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3:
   for (auto [reg, expr] : in) {
     for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, expr[lane], lane); }
   }
+  ctx.commit_pending_operations();
   for (auto& inst : bb.instructions_) {
     for (auto lane = 0u; lane < ua.lanes(); ++lane) { inst.opcode_->emit_smt(ctx, lane, inst.operands_); }
+    ctx.commit_pending_operations();
   }
   return {out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0).simplify(); }) |
               ranges::to<std::vector>(),

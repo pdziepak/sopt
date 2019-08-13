@@ -49,7 +49,10 @@ class smt_context {
   std::map<uint64_t, z3::expr> parameters_;
 
   std::vector<std::tuple<z3::expr, std::function<void(uint64_t)>>> unknown_immediates_;
+  std::unordered_map<void*, z3::expr> unique_unknown_immediates_;
   std::vector<std::vector<z3::expr>> registers_;
+
+  std::vector<std::tuple<unsigned, unsigned, z3::expr>> pending_register_writes_;
 
   z3::expr extra_restrictions_;
 
@@ -62,12 +65,14 @@ public:
   z3::expr get_register(unsigned r, z3::expr lane);
   void set_register(unsigned r, z3::expr v, unsigned lane);
 
+  void commit_pending_operations();
+
   z3::expr get_parameter(uint64_t p) const;
   z3::expr get_parameter(z3::expr p);
 
   z3::expr get_constant(uint64_t v) const;
 
-  z3::expr add_unknown_immediate(std::function<void(uint64_t)> fn);
+  z3::expr add_unknown_immediate(void* id, std::function<void(uint64_t)> fn);
   void resolve_unknown_immediates(z3::model const& mdl);
   z3::expr extra_restrictions() const;
 

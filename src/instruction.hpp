@@ -69,7 +69,7 @@ public:
       if (known_) {
         return ctx.get_constant(value_);
       } else {
-        return ctx.add_unknown_immediate([this](uint64_t v) {
+        return ctx.add_unknown_immediate(this, [this](uint64_t v) {
           value_ = v;
           known_ = true;
         });
