@@ -42,6 +42,7 @@ public:
 
   void next_step(stats& st);
 
+  basic_block const& current() const { return current_; }
   double current_score() const { return current_score_; }
 };
 

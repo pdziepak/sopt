@@ -59,7 +59,7 @@ target::target(uarch::uarch const& ua, interface const& ifce, basic_block trgt)
                      return std::pair(p, z3ctx_.ctx_.bv_const(fmt::format("p{}", p).c_str(), 32));
                    }) |
                    ranges::to<std::map>()),
-      target_extra_smt_(z3ctx_.ctx_), best_(trgt), best_score_(score(ua, ifce, tests_, target_)) {
+      target_extra_smt_(z3ctx_.ctx_), best_(trgt), best_score_(std::get<0>(score(ua, ifce, tests_, target_))) {
   spdlog::trace("prepared tests: {}", fmt::join(tests_, ", "));
   std::tie(target_smt_, target_extra_smt_) =
       emit_smt(ua, z3ctx_, target_, param_exprs_, in_exprs_, ifce.output_registers);

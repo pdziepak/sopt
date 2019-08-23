@@ -46,7 +46,7 @@ double score_performance(uarch::uarch const& ua, interface const& ifce, basic_bl
   return cost_to_score(cost_performance(ua, ifce, bb));
 }
 
-double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb) {
+std::tuple<double, bool> score(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb) {
   double cost = 0;
 
   for (auto [param, in, out] : tests) {
@@ -55,10 +55,10 @@ double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> co
       if (!actual_out || (*actual_out)[idx] != out[idx]) { cost += 1; }
     }
   }
-
+  bool correct = cost == 0.;
   cost += cost_performance(ua, ifce, bb);
 
-  return cost_to_score(cost);
+  return {cost_to_score(cost), correct};
 }
 
 bool equivalent(uarch::uarch const& ua, interface const& ifce, basic_block const& a, basic_block const& b) {

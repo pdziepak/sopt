@@ -177,7 +177,7 @@ void path::next_step(stats& st) {
 
   synthesize_immediates(candidate, st);
 
-  auto candidate_score = score(target_->ua_, target_->ifce_, target_->tests_, candidate);
+  auto [candidate_score, is_correct] = score(target_->ua_, target_->ifce_, target_->tests_, candidate);
   auto alpha = std::min(1., candidate_score / current_score_);
   if (std::uniform_real_distribution<double>{}(*prng_) > alpha) { return; }
 
@@ -186,7 +186,7 @@ void path::next_step(stats& st) {
   current_ = candidate;
   current_score_ = candidate_score;
 
-  if (!is_best_score || !check_tests(current_)) { return; }
+  if (!is_best_score || !is_correct) { return; }
 
   auto [candidate_smt, candidate_extra_smt] = emit_smt(target_->ua_, target_->z3ctx_, candidate, target_->param_exprs_,
                                                        target_->in_exprs_, target_->ifce_.output_registers);
@@ -224,7 +224,7 @@ void path::next_step(stats& st) {
     spdlog::trace("adding test case: ({}, {}, {})", paramv, inv, outv);
     target_->tests_.emplace_back(paramv, inv, outv);
 
-    current_score_ = score(target_->ua_, target_->ifce_, target_->tests_, current_);
+    current_score_ = std::get<0>(score(target_->ua_, target_->ifce_, target_->tests_, current_));
   }
 }
 

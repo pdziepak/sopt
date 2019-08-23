@@ -25,4 +25,4 @@
 using test =
     std::tuple<std::map<uint64_t, value>, std::vector<std::pair<unsigned, std::vector<value>>>, std::vector<value>>;
 
-double score(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb);
+std::tuple<double, bool> score(uarch::uarch const& ua, interface const& ifce, std::vector<test> const& tests, basic_block& bb);
