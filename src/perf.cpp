@@ -33,14 +33,18 @@ double cost_performance(uarch::uarch const& ua, interface const& ifce, basic_blo
     for (auto op_idx = 1u; op_idx < inst.operands_.size(); ++op_idx) {
       auto& op = inst.operands_[op_idx];
       if (!op.is_register()) { continue; }
+      if (op.get_register_id() >= registers_ready_at.size()) { continue; }
       current_cycle = std::max(current_cycle, registers_ready_at[op.get_register_id()]);
-      if (inst.opcode_->is_wide_operand(op_idx)) {
+      if (inst.opcode_->is_wide_operand(op_idx) && op.get_register_id() + 1 < registers_ready_at.size()) {
         current_cycle = std::max(current_cycle, registers_ready_at[op.get_register_id() + 1]);
       }
     }
-    registers_ready_at[inst.operands_.front().get_register_id()] = current_cycle + inst.opcode_->latency();
-    if (inst.opcode_->is_wide_operand(0)) {
-      registers_ready_at[inst.operands_.front().get_register_id() + 1] = current_cycle + inst.opcode_->latency();
+    if (inst.operands_.front().get_register_id() < registers_ready_at.size()) {
+      registers_ready_at[inst.operands_.front().get_register_id()] = current_cycle + inst.opcode_->latency();
+      if (inst.opcode_->is_wide_operand(0) &&
+          inst.operands_.front().get_register_id() + 1 < registers_ready_at.size()) {
+        registers_ready_at[inst.operands_.front().get_register_id() + 1] = current_cycle + inst.opcode_->latency();
+      }
     }
     ++current_cycle;
   }

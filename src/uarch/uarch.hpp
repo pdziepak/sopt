@@ -45,6 +45,8 @@ public:
   std::vector<std::unique_ptr<opcode>> const& all_opcodes() const { return all_opcodes_; }
 
   opcode* get_opcode(std::string_view op) const { return opcode_by_name_.at(op); }
+
+  bool is_valid_register(unsigned id) const { return id < gp_registers_; }
 };
 
 class latency {
@@ -149,10 +151,17 @@ public:
 };
 
 template<typename... Operands, size_t... Idx, typename Context>
-bool do_verify(std::index_sequence<Idx...>, Context& ctx, unsigned lane, std::vector<operand> const& ops) {
-  auto verify_operand = [&ctx, lane](auto desc_ptr, auto& op) {
+bool do_verify(std::index_sequence<Idx...>, Context& ctx, uarch const& ua, unsigned lane,
+               std::vector<operand> const& ops) {
+  auto verify_operand = [&ctx, &ua, lane](auto desc_ptr, auto& op) {
     using namespace operand_descriptors;
     using desc = std::remove_pointer_t<decltype(desc_ptr)>;
+    if constexpr (is_wide<desc>) {
+      if (op.is_register() &&
+          (!ua.is_valid_register(op.get_register_id()) || !ua.is_valid_register(op.get_register_id() + 1))) {
+        return false;
+      }
+    }
     if constexpr (!std::is_same_v<desc, dst_reg_t> && !std::is_same_v<desc, dst_reg2_t>) {
       if (!op.is_valid(ctx)) { return false; }
     }
@@ -193,10 +202,11 @@ template<typename... Operands> struct operands {
 
   operands(Operands...) {}
 
-  template<typename Context> static bool verify(Context const& ctx, unsigned lane, std::vector<operand> const& ops) {
+  template<typename Context>
+  static bool verify(Context const& ctx, uarch const& ua, unsigned lane, std::vector<operand> const& ops) {
     using namespace detail;
     if (ops.size() != count || !ops[0].is_register()) { return false; }
-    return do_verify<Operands...>(std::make_index_sequence<count>(), ctx, lane, ops);
+    return do_verify<Operands...>(std::make_index_sequence<count>(), ctx, ua, lane, ops);
   }
 
   template<typename Function, typename Context>
@@ -252,14 +262,14 @@ public:
             Function(std::move(fn)) {}
 
       virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) override {
-        if (!ops::verify(ctx, lane, operands)) { return false; }
+        if (!ops::verify(ctx, ua_, lane, operands)) { return false; }
         ops::apply(*static_cast<Function*>(this), ctx, lane, operands);
         return true;
       }
 
       virtual bool evaluate_all_lanes(evaluation_context& ctx, std::vector<operand>& operands) override {
-        if (!ops::verify(ctx, 0, operands)) { return false; }
-        for (auto l = 0u; l < 32; ++l) { ops::apply(*static_cast<Function*>(this), ctx, l, operands); }
+        if (!ops::verify(ctx, ua_, 0, operands)) { return false; }
+        for (auto l = 0u; l < ua_.lanes(); ++l) { ops::apply(*static_cast<Function*>(this), ctx, l, operands); }
         ctx.commit_pending_operations();
         return true;
       }
