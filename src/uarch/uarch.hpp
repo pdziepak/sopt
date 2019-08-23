@@ -246,14 +246,21 @@ public:
 
     class concrete_opcode final : public opcode, Function {
     public:
-      explicit concrete_opcode(std::string_view name, ::uarch::latency lat, Function fn)
-          : opcode(name, ops::count, ops::make_register_mask(), ops::make_immediate_mask(), ops::make_parameter_mask(),
-                   ops::make_wide_mask(), unsigned(lat)),
+      explicit concrete_opcode(uarch& ua, std::string_view name, ::uarch::latency lat, Function fn)
+          : opcode(ua, name, ops::count, ops::make_register_mask(), ops::make_immediate_mask(),
+                   ops::make_parameter_mask(), ops::make_wide_mask(), unsigned(lat)),
             Function(std::move(fn)) {}
 
       virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) override {
         if (!ops::verify(ctx, lane, operands)) { return false; }
         ops::apply(*static_cast<Function*>(this), ctx, lane, operands);
+        return true;
+      }
+
+      virtual bool evaluate_all_lanes(evaluation_context& ctx, std::vector<operand>& operands) override {
+        if (!ops::verify(ctx, 0, operands)) { return false; }
+        for (auto l = 0u; l < 32; ++l) { ops::apply(*static_cast<Function*>(this), ctx, l, operands); }
+        ctx.commit_pending_operations();
         return true;
       }
 
@@ -278,7 +285,7 @@ public:
       }
     };
 
-    add_opcode(std::make_unique<concrete_opcode>(name, lat, std::forward<Function>(fn)));
+    add_opcode(std::make_unique<concrete_opcode>(*uarch_, name, lat, std::forward<Function>(fn)));
     return std::move(*this);
   }
 

@@ -161,6 +161,10 @@ public:
 };
 
 class opcode {
+protected:
+  uarch::uarch& ua_;
+
+private:
   std::string name_;
   unsigned operand_count_ = 0;
   std::vector<bool> registers_;
@@ -171,10 +175,10 @@ class opcode {
   unsigned latency_;
 
 public:
-  explicit opcode(std::string_view name, unsigned opcount, std::vector<bool> registers, std::vector<bool> immediates,
-                  std::vector<bool> parameters, std::vector<bool> wide, unsigned lat)
-      : name_(name), operand_count_(opcount), registers_(std::move(registers)), immediates_(std::move(immediates)),
-        parameters_(std::move(parameters)), wide_(std::move(wide)), latency_(lat) {}
+  explicit opcode(uarch::uarch& ua, std::string_view name, unsigned opcount, std::vector<bool> registers,
+                  std::vector<bool> immediates, std::vector<bool> parameters, std::vector<bool> wide, unsigned lat)
+      : ua_(ua), name_(name), operand_count_(opcount), registers_(std::move(registers)),
+        immediates_(std::move(immediates)), parameters_(std::move(parameters)), wide_(std::move(wide)), latency_(lat) {}
   virtual ~opcode() = default;
 
   std::string_view name() const { return name_; }
@@ -201,6 +205,8 @@ public:
   unsigned latency() const { return latency_; }
 
   virtual bool evaluate(evaluation_context& ctx, unsigned lane, std::vector<operand>& operands) = 0;
+  virtual bool evaluate_all_lanes(evaluation_context& ctx, std::vector<operand>& operands) = 0;
+
   virtual void emit_smt(smt_context& ctx, unsigned lane, std::vector<operand>& operands) = 0;
 
   virtual void update_defined_registers(std::vector<operand> const& operands,

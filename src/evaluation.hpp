@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <map>
@@ -72,18 +73,25 @@ public:
 };
 
 class evaluation_context {
-  uarch::uarch const& ua_;
-  std::map<uint64_t, value> const& parameters_;
+  uarch::uarch const* ua_;
+  std::map<uint64_t, value> const* parameters_;
 
+  unsigned zero_register_;
   std::vector<std::vector<value>> registers_;
-  std::vector<bool> defined_registers_;
+  std::bitset<256> defined_registers_;
 
-  std::vector<std::tuple<unsigned, unsigned, value>> pending_register_writes_;
+  struct pending_op {
+    unsigned lane;
+    unsigned reg;
+    value val;
+  };
+  std::vector<pending_op> pending_register_writes_;
 
 public:
   using value_type = value;
 
   explicit evaluation_context(uarch::uarch const& ua, std::map<uint64_t, value> const& params);
+  void reset(uarch::uarch const& ua, std::map<uint64_t, value> const& params);
 
   value get_register(unsigned r, unsigned lane) const;
   value get_register(unsigned r, value lane) const;

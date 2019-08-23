@@ -32,35 +32,41 @@ std::ostream& operator<<(std::ostream& os, value const& v) {
 }
 
 evaluation_context::evaluation_context(uarch::uarch const& ua, std::map<uint64_t, value> const& params)
-    : ua_(ua), parameters_(params), registers_(ua.lanes()), defined_registers_(ua.gp_registers()) {
+    : ua_(&ua), parameters_(&params), zero_register_(ua.zero_gp_register().value_or(-1)), registers_(ua.lanes()), defined_registers_(ua.gp_registers()) {
   for (auto& rs : registers_) { rs.resize(ua.gp_registers()); }
 }
 
+void evaluation_context::reset(uarch::uarch const& ua, std::map<uint64_t, value> const& params) {
+  assert(&ua == ua_);
+  (void)ua;
+  parameters_ = &params;
+}
+
 value evaluation_context::get_register(unsigned r, unsigned lane) const {
-  if (ua_.zero_gp_register() == r) { return value(0); }
-  assert(r < ua_.gp_registers());
+  if (zero_register_ == r) { return value(0); }
+  assert(r < ua_->gp_registers());
   assert(defined_registers_[r]);
-  return registers_[lane % ua_.lanes()][r];
+  return registers_[lane & (ua_->lanes() - 1)][r];
 }
 value evaluation_context::get_register(unsigned r, value lane) const {
   if (lane.is_undefined()) { return {}; }
   return get_register(r, lane.as_i32());
 }
 void evaluation_context::set_register(unsigned r, value v, unsigned lane) {
-  if (ua_.zero_gp_register() == r) { return; }
-  assert(r < ua_.gp_registers());
+  if (zero_register_ == r) { return; }
+  assert(r < ua_->gp_registers());
   v.trim();
-  pending_register_writes_.emplace_back(lane, r, std::move(v));
+  pending_register_writes_.emplace_back(pending_op { lane, r, v });
 }
 bool evaluation_context::is_register_defined(unsigned r) const {
-  if (ua_.zero_gp_register() == r) { return true; }
+  if (zero_register_ == r) { return true; }
   return defined_registers_[r];
 }
 
 void evaluation_context::commit_pending_operations() {
   for (auto& [lane, reg, expr] : pending_register_writes_) {
-    assert(lane < ua_.lanes());
-    assert(reg < ua_.gp_registers());
+    assert(lane < ua_->lanes());
+    assert(reg < ua_->gp_registers());
     registers_[lane][reg] = std::move(expr);
     defined_registers_[reg] = true;
   }
@@ -69,11 +75,11 @@ void evaluation_context::commit_pending_operations() {
 
 value evaluation_context::get_parameter(value p) const {
   if (p.is_undefined()) { return {}; }
-  return parameters_.at(p.as_i32());
+  return parameters_->at(p.as_i32());
 }
 bool evaluation_context::is_valid_parameter(value p) const {
   if (p.is_undefined()) { return true; }
-  return parameters_.count(p.as_i32());
+  return parameters_->count(p.as_i32());
 }
 bool evaluation_context::is_valid_parameter64(value p) const {
   return is_valid_parameter(p) && is_valid_parameter(p + 4);
@@ -88,21 +94,27 @@ std::tuple<value, value> evaluation_context::split_u64(value v) {
   return {value(uint32_t(v.as_i64())), value(uint32_t(v.as_i64() >> 32))};
 }
 
+thread_local std::unique_ptr<evaluation_context> cached_context;
+
 std::optional<std::vector<value>> evaluate(uarch::uarch const& ua, basic_block& bb,
                                            std::map<uint64_t, value> const& params,
                                            std::vector<std::pair<unsigned, std::vector<value>>> const& in,
                                            std::vector<unsigned> const& out) {
-  auto ctx = evaluation_context(ua, params);
+  auto& ctx = [&] () -> evaluation_context& {
+    if (!cached_context) {
+      cached_context = std::make_unique<evaluation_context>(ua, params);
+    } else {
+      cached_context->reset(ua, params);
+    }
+    return *cached_context;
+  }();
   for (auto [reg, val] : in) {
     assert(val.size() == ua.lanes());
     for (auto lane = 0u; lane < ua.lanes(); ++lane) { ctx.set_register(reg, val[lane], lane); }
   }
   ctx.commit_pending_operations();
   for (auto& inst : bb.instructions_) {
-    for (auto lane = 0u; lane < ua.lanes(); ++lane) {
-      if (!inst.opcode_->evaluate(ctx, lane, inst.operands_)) { return {}; }
-    }
-    ctx.commit_pending_operations();
+    if (!inst.opcode_->evaluate_all_lanes(ctx, inst.operands_)) { return {}; }
   }
   if (ranges::any_of(out, [&](unsigned reg) { return !ctx.is_register_defined(reg); })) { return {}; }
   return out | ranges::view::transform([&](unsigned reg) { return ctx.get_register(reg, 0); }) |
