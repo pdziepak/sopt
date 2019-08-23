@@ -42,9 +42,14 @@ template<typename Range> z3::expr make_or(z3::context& ctx, Range&& r) {
   return z3::mk_or(make_vector(ctx, std::forward<Range>(r)));
 }
 
+struct z3_context {
+  z3::context ctx_;
+  std::unordered_map<uint64_t, z3::expr> cached_constants_;
+};
+
 class smt_context {
   uarch::uarch const& ua_;
-  z3::context& z3_;
+  z3_context& z3_;
 
   std::map<uint64_t, z3::expr> parameters_;
 
@@ -59,7 +64,7 @@ class smt_context {
 public:
   using value_type = z3::expr;
 
-  explicit smt_context(uarch::uarch const& ua, z3::context& z3ctx, std::map<uint64_t, z3::expr> const& params = {});
+  explicit smt_context(uarch::uarch const& ua, z3_context& z3ctx, std::map<uint64_t, z3::expr> const& params = {});
 
   z3::expr get_register(unsigned r, unsigned lane) const;
   z3::expr get_register(unsigned r, z3::expr lane);
@@ -80,7 +85,7 @@ public:
   static std::tuple<z3::expr, z3::expr> split_u64(z3::expr v);
 };
 
-std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
+std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3_context& z3ctx, basic_block& bb,
                                                      std::map<uint64_t, z3::expr> const& params,
                                                      std::vector<std::pair<unsigned, std::vector<z3::expr>>> const& in,
                                                      std::vector<unsigned> const& out);

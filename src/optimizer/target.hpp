@@ -30,7 +30,7 @@ class target {
 
   basic_block target_;
 
-  z3::context z3ctx_;
+  ::z3_context z3ctx_;
 
   std::vector<std::pair<unsigned, std::vector<z3::expr>>> in_exprs_;
   std::map<uint64_t, z3::expr> param_exprs_;
@@ -47,7 +47,7 @@ class target {
 public:
   target(uarch::uarch const& ua, interface const& ifce, basic_block trgt);
 
-  z3::context& z3_context() { return z3ctx_; }
+  ::z3_context& z3_context() { return z3ctx_; }
 
   double best_score() const { return best_score_; }
   basic_block const& best() const { return best_; }

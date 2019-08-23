@@ -84,7 +84,7 @@ void path::synthesize_immediates(basic_block& candidate, stats& st) {
   auto original_candidate = candidate;
 
   auto vars = make_vector(
-      z3ctx, ranges::view::concat(params | ranges::view::values, in | ranges::view::values | ranges::view::join));
+      z3ctx.ctx_, ranges::view::concat(params | ranges::view::values, in | ranges::view::values | ranges::view::join));
 
   do {
     candidate = original_candidate;
@@ -95,11 +95,12 @@ void path::synthesize_immediates(basic_block& candidate, stats& st) {
 
     for (auto& [paramv, inv, outv] : tests) {
       auto vals = make_vector(
-          z3ctx, ranges::view::concat(paramv | ranges::view::values, inv | ranges::view::values | ranges::view::join) |
-                     ranges::view::transform([&](value const& v) { return z3ctx.bv_val(v.as_i32(), 32); }));
-      auto cnd = (make_and(z3ctx, ranges::view::zip(candidate_smt, outv) |
+          z3ctx.ctx_,
+          ranges::view::concat(paramv | ranges::view::values, inv | ranges::view::values | ranges::view::join) |
+              ranges::view::transform([&](value const& v) { return z3ctx.ctx_.bv_val(v.as_i32(), 32); }));
+      auto cnd = (make_and(z3ctx.ctx_, ranges::view::zip(candidate_smt, outv) |
                                       ranges::view::transform([&](std::tuple<z3::expr, value> v) {
-                                        return (std::get<0>(v) == z3ctx.bv_val(std::get<1>(v).as_i32(), 32));
+                                        return (std::get<0>(v) == z3ctx.ctx_.bv_val(std::get<1>(v).as_i32(), 32));
                                       })) &&
                   candidate_extra_smt);
       z3slv_->add(cnd.substitute(vars, vals));
@@ -126,9 +127,9 @@ void path::synthesize_immediates(basic_block& candidate, stats& st) {
     candidate_extra_smt = ctx.extra_restrictions();
 
     z3slv_->reset();
-    z3slv_->add(make_or(z3ctx, ranges::view::zip(candidate_smt, target_smt) | ranges::view::transform([&](auto&& a_b) {
-                                 return std::get<0>(a_b) != std::get<1>(a_b);
-                               })));
+    z3slv_->add(make_or(z3ctx.ctx_,
+                        ranges::view::zip(candidate_smt, target_smt) |
+                            ranges::view::transform([&](auto&& a_b) { return std::get<0>(a_b) != std::get<1>(a_b); })));
     st.on_smt_query();
     auto result = z3slv_->check();
     if (result == z3::check_result::unsat) {
@@ -193,7 +194,7 @@ void path::next_step(stats& st) {
   st.on_smt_query();
 
   z3slv_->reset();
-  z3slv_->add(make_or(target_->z3ctx_,
+  z3slv_->add(make_or(target_->z3ctx_.ctx_,
                       ranges::view::zip(candidate_smt, target_->target_smt_) |
                           ranges::view::transform([](auto c_t) { return std::get<0>(c_t) != std::get<1>(c_t); })) ||
               !candidate_extra_smt);

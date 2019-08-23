@@ -51,15 +51,15 @@ target::target(uarch::uarch const& ua, interface const& ifce, basic_block trgt)
       in_exprs_(ifce.input_registers | ranges::view::transform([&](unsigned reg) {
                   return std::pair(reg,
                                    ranges::view::iota(0u, ua.lanes()) | ranges::view::transform([&](unsigned lane) {
-                                     return z3ctx_.bv_const(fmt::format("r{}l{}", reg, lane).c_str(), 32);
+                                     return z3ctx_.ctx_.bv_const(fmt::format("r{}l{}", reg, lane).c_str(), 32);
                                    }) | ranges::to<std::vector>());
                 }) |
                 ranges::to<std::vector>()),
       param_exprs_(ifce.parameters | ranges::view::transform([&](uint64_t p) {
-                     return std::pair(p, z3ctx_.bv_const(fmt::format("p{}", p).c_str(), 32));
+                     return std::pair(p, z3ctx_.ctx_.bv_const(fmt::format("p{}", p).c_str(), 32));
                    }) |
                    ranges::to<std::map>()),
-      target_extra_smt_(z3ctx_), best_(trgt), best_score_(score(ua, ifce, tests_, target_)) {
+      target_extra_smt_(z3ctx_.ctx_), best_(trgt), best_score_(score(ua, ifce, tests_, target_)) {
   spdlog::trace("prepared tests: {}", fmt::join(tests_, ", "));
   std::tie(target_smt_, target_extra_smt_) =
       emit_smt(ua, z3ctx_, target_, param_exprs_, in_exprs_, ifce.output_registers);

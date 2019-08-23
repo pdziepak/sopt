@@ -70,14 +70,14 @@ bool equivalent(uarch::uarch const& ua, interface const& ifce, basic_block const
 
   (void)ifce;
 
-  z3::context ctx;
+  z3_context ctx;
   auto param = ifce.parameters | ranges::view::transform([&](uint64_t p) {
-                 return std::pair(p, ctx.bv_const(fmt::format("p{}", p).c_str(), 32));
+                 return std::pair(p, ctx.ctx_.bv_const(fmt::format("p{}", p).c_str(), 32));
                }) |
                ranges::to<std::map>();
   auto in = ifce.input_registers | ranges::view::transform([&](unsigned reg) {
               return std::pair(reg, ranges::view::iota(0u, ua.lanes()) | ranges::view::transform([&](unsigned lane) {
-                                      return ctx.bv_const(fmt::format("r{}l{}", reg, lane).c_str(), 32);
+                                      return ctx.ctx_.bv_const(fmt::format("r{}l{}", reg, lane).c_str(), 32);
                                     }) | ranges::to<std::vector>());
             }) |
             ranges::to<std::vector>();
@@ -85,8 +85,8 @@ bool equivalent(uarch::uarch const& ua, interface const& ifce, basic_block const
   auto [expr_b, extra_b] = emit_smt(ua, ctx, b1, param, in, ifce.output_registers);
   assert(expr_a.size() == expr_b.size());
 
-  z3::solver slv(ctx);
-  auto in_expr = z3::expr_vector(ctx);
+  z3::solver slv(ctx.ctx_);
+  auto in_expr = z3::expr_vector(ctx.ctx_);
   for (auto&& expr :
        ranges::view::concat(param | ranges::view::values, in | ranges::view::values | ranges::view::join)) {
     in_expr.push_back(expr);
@@ -111,7 +111,7 @@ basic_block optimize(uarch::uarch const& ua, interface const& ifce, basic_block 
 
   auto trace_tick = start + std::chrono::seconds(1);
 
-  z3::solver z3slv(trgt.z3_context());
+  z3::solver z3slv(trgt.z3_context().ctx_);
 
   auto pths = std::vector<optimizer::path>(16, optimizer::path(prng, z3slv, trgt));
 

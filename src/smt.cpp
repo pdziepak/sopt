@@ -21,9 +21,9 @@
 #include "instruction.hpp"
 #include "uarch/uarch.hpp"
 
-smt_context::smt_context(uarch::uarch const& ua, z3::context& z3ctx, std::map<uint64_t, z3::expr> const& params)
-    : ua_(ua), z3_(z3ctx), parameters_(params), registers_(ua.lanes()), extra_restrictions_(z3_.bool_val(true)) {
-  for (auto& rs : registers_) { rs.resize(ua.gp_registers(), z3_.bv_val(0, 32)); }
+smt_context::smt_context(uarch::uarch const& ua, z3_context& z3ctx, std::map<uint64_t, z3::expr> const& params)
+    : ua_(ua), z3_(z3ctx), parameters_(params), registers_(ua.lanes()), extra_restrictions_(z3_.ctx_.bool_val(true)) {
+  for (auto& rs : registers_) { rs.resize(ua.gp_registers(), get_constant(0)); }
 }
 
 z3::expr smt_context::get_register(unsigned r, unsigned lane) const {
@@ -32,11 +32,18 @@ z3::expr smt_context::get_register(unsigned r, unsigned lane) const {
   return registers_[lane % ua_.lanes()][r];
 }
 z3::expr smt_context::get_register(unsigned r, z3::expr lane) {
-  auto current = get_constant(0); // TODO: poison?
-  for (auto l = 0u; l < ua_.lanes(); ++l) {
-    current = z3::ite(z3::urem(lane, ua_.lanes()) == get_constant(l), registers_[l][r], std::move(current)).simplify();
+  if (ua_.zero_gp_register() == r) { return get_constant(0); }
+  uint64_t l;
+  lane = z3::urem(lane, ua_.lanes()).simplify();
+  if (lane.is_numeral_u64(l)) {
+    assert(l < ua_.lanes());
+    return registers_[l][r];
   }
-  return current.simplify();
+  auto current = registers_[0][r];
+  for (auto l = 1u; l < ua_.lanes(); ++l) {
+    current = z3::ite(lane == get_constant(l), registers_[l][r], std::move(current));
+  }
+  return current;
 }
 void smt_context::set_register(unsigned r, z3::expr v, unsigned lane) {
   if (ua_.zero_gp_register() == r) { return; }
@@ -60,20 +67,29 @@ z3::expr smt_context::get_parameter(z3::expr p) {
   auto current = get_constant(0); // TODO: poison?
   for (auto [k, v] : parameters_) { current = z3::ite(p == get_constant(k), v, std::move(current)); }
   extra_restrictions_ = std::move(extra_restrictions_) &&
-                        make_or(z3_, parameters_ | ranges::view::keys |
-                                         ranges::view::transform([&](uint64_t k) { return p == get_constant(k); }));
+                        make_or(z3_.ctx_, parameters_ | ranges::view::keys | ranges::view::transform([&](uint64_t k) {
+                                            return p == get_constant(k);
+                                          }));
   return current;
 }
 
+static thread_local std::unordered_map<uint64_t, z3::expr> cached_constants;
+
 z3::expr smt_context::get_constant(uint64_t v) const {
-  return z3_.bv_val(v, 32);
+  auto it = z3_.cached_constants_.find(v);
+  if (it == z3_.cached_constants_.end()) {
+    auto ex = z3_.ctx_.bv_val(v, 32);
+    z3_.cached_constants_.emplace(v, ex);
+    return ex;
+  }
+  return it->second;
 }
 
 z3::expr smt_context::add_unknown_immediate(void* id, std::function<void(uint64_t)> fn) {
   auto it = unique_unknown_immediates_.find(id);
   if (it != unique_unknown_immediates_.end()) { return it->second; }
-  auto expr = std::get<0>(
-      unknown_immediates_.emplace_back(z3_.bv_const(fmt::format("imm{}", unknown_immediates_.size()).c_str(), 32), fn));
+  auto expr = std::get<0>(unknown_immediates_.emplace_back(
+      z3_.ctx_.bv_const(fmt::format("imm{}", unknown_immediates_.size()).c_str(), 32), fn));
   unique_unknown_immediates_.insert(std::pair(id, expr));
   return expr;
 }
@@ -96,7 +112,7 @@ std::tuple<z3::expr, z3::expr> smt_context::split_u64(z3::expr v) {
   return {v.extract(31, 0), v.extract(63, 32)};
 }
 
-std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3::context& z3ctx, basic_block& bb,
+std::tuple<std::vector<z3::expr>, z3::expr> emit_smt(uarch::uarch const& ua, z3_context& z3ctx, basic_block& bb,
                                                      std::map<uint64_t, z3::expr> const& params,
                                                      std::vector<std::pair<unsigned, std::vector<z3::expr>>> const& in,
                                                      std::vector<unsigned> const& out) {
